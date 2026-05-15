@@ -1,0 +1,49 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: |
+          yarn install || npm install
+          
+      - name: Build
+        run: |
+          # 如果 package.json 中没有 build 脚本，这里会尝试运行，失败则跳过
+          npm run build || echo "Build script not found or failed, skipping."
+
+      - name: Package Plugin
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          # 打包当前目录，排除 node_modules 和 git 相关文件
+          zip -r "plugin-file-previewer-kkfileview-v${VERSION}.zip" . -x "node_modules/*" ".git/*" ".github/*"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Latest Auto-build' }}
+          draft: false
+          prerelease: ${{ github.ref_type != 'tag' }}
+          files: |
+            plugin-file-previewer-kkfileview-v*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
