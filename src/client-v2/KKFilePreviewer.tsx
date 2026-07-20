@@ -1,25 +1,21 @@
-/**
- * @jsxRuntime classic
- * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
- */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAPIClient, useCurrentUserContext } from '@nocobase/client';
+import { useAPIClient, useCurrentUserContext } from './hooks';
 import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin } from 'antd';
 import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { useT } from './locale';
-import { decidePreviewMode, getFileExt, parseExtensions } from './previewUtils';
-import { FileViewerRenderer } from './FileViewerRenderer';
+import { FileViewerRenderer } from '../client/FileViewerRenderer';
+import { decidePreviewMode, getFileExt, parseExtensions } from '../client/previewUtils';
 import {
   EmbedCodePermission,
   PREVIEW_SERVICE_REGISTRY,
   PreviewEngine,
   PreviewService,
-} from './configCache';
-import { useKkfileviewConfig } from './useKkfileviewConfig';
-import { resolveWatermarkTemplate } from './watermarkTemplate';
-import { resolveFileUrl } from './runtimeUrl';
+} from '../client/configCache';
+import { useKkfileviewConfig } from '../client/useKkfileviewConfig';
+import { resolveWatermarkTemplate } from '../client/watermarkTemplate';
+import { resolveFileUrl } from '../client/runtimeUrl';
 import { DEFAULT_EXTENSIONS, DEFAULT_FILE_VIEWER_EXTENSIONS, DEFAULT_MICROSOFT_EXTENSIONS } from '../shared/constants';
 
 // ---------------------------------------------------------------------------

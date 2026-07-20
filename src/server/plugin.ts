@@ -9,6 +9,8 @@ import {
   DEFAULT_KKFILEVIEW_HOST,
   DEFAULT_BASEMETAS_HOST,
   DEFAULT_MICROSOFT_HOST,
+  DEFAULT_FILE_VIEWER_ASSET_BASE,
+  DEFAULT_FILE_VIEWER_EXTENSIONS,
   DEFAULT_PREFERRED_PREVIEW,
 } from '../shared/constants';
 import { resolveWatermarkTemplate } from '../shared/watermarkTemplate';
@@ -44,11 +46,14 @@ type KkfileviewSettingsRecord = HealthCheckSettings & {
   kkfileviewExtensions?: string;
   basemetasExtensions?: string;
   microsoftExtensions?: string;
+  fileViewerAssetBase?: string;
+  fileViewerExtensions?: string | string[];
   nocobaseHost?: string;
   preferKkfileview?: boolean;
   enableKkfileview?: boolean;
   enableBasemetas?: boolean;
   enableMicrosoft?: boolean;
+  enableFileViewer?: boolean;
   enablePrint?: boolean;
   enableOpenInNewWindow?: boolean;
   enableFullscreenButton?: boolean;
@@ -134,6 +139,78 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function normalizeExtensionTokens(items: Array<unknown> = []): string[] {
+  // 统一清洗扩展名列表，避免大小写、空值与重复项带来脏数据。
+  return Array.from(new Set(items.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)));
+}
+
+function parseExtensionsSaveInput(input: unknown, fallback: Array<unknown> = []): string[] {
+  // 数组输入直接清洗，兼容前端 tags 组件提交结果。
+  if (Array.isArray(input)) {
+    return normalizeExtensionTokens(input);
+  }
+  // 读取字符串输入，兼容 JSON 字符串与逗号分隔两种历史格式。
+  const rawValue = String(input ?? '').trim();
+  // 空输入时回退到给定默认值。
+  if (!rawValue) {
+    return normalizeExtensionTokens(fallback);
+  }
+  try {
+    // 优先按 JSON 数组解析，兼容数据库历史存量值。
+    const parsed = JSON.parse(rawValue);
+    if (Array.isArray(parsed)) {
+      return normalizeExtensionTokens(parsed);
+    }
+  } catch {
+    // JSON 解析失败时继续按逗号分隔处理普通字符串输入。
+  }
+  // 最后回退到逗号分隔解析，兼容手工输入场景。
+  return normalizeExtensionTokens(rawValue.split(','));
+}
+
+function normalizeFileViewerAssetBase(value: unknown, fallback: unknown = DEFAULT_FILE_VIEWER_ASSET_BASE): string {
+  // 优先使用当前值，缺失时再回退到已有值或默认值。
+  const rawValue = String(value ?? fallback ?? '').trim();
+  // 统一去掉尾部多余斜杠后再补一个，保证路径保存结果稳定。
+  return rawValue ? `${rawValue.replace(/\/+$/, '')}/` : '';
+}
+
+export function normalizeSettingsSaveValues(
+  values: Record<string, unknown>, // 接收本次提交的原始配置值。
+  fallback: Partial<KkfileviewSettingsRecord> = {}, // 接收当前记录作为缺省回退值。
+): Record<string, unknown> {
+  // 统一归一化复制权限，避免非法值污染数据库。
+  const copyEmbedHtmlPermission = String(
+    values.copyEmbedHtmlPermission ?? fallback.copyEmbedHtmlPermission ?? '',
+  ).trim();
+  // 统一归一化水印类型，只允许 global 与 preview 两种值。
+  const watermarkType = String(values.watermarkType ?? fallback.watermarkType ?? '').trim();
+  // 统一解析 File Viewer 扩展名输入，兼容数组、JSON 字符串和逗号字符串。
+  const fileViewerExtensions = parseExtensionsSaveInput(
+    values.fileViewerExtensions ?? fallback.fileViewerExtensions ?? DEFAULT_FILE_VIEWER_EXTENSIONS,
+    DEFAULT_FILE_VIEWER_EXTENSIONS,
+  );
+  // 返回服务端最终写库的稳定值集合。
+  return {
+    ...values,
+    nocobaseHost: String(values.nocobaseHost ?? fallback.nocobaseHost ?? '').trim(),
+    basemetasRequestType:
+      (values.basemetasRequestType ?? fallback.basemetasRequestType) === 'base64' ? 'base64' : 'query',
+    copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(copyEmbedHtmlPermission)
+      ? copyEmbedHtmlPermission
+      : 'user',
+    watermarkType: watermarkType === 'global' ? 'global' : 'preview',
+    watermark: String(values.watermark ?? fallback.watermark ?? '').trim(),
+    fileViewerAssetBase: normalizeFileViewerAssetBase(
+      values.fileViewerAssetBase,
+      fallback.fileViewerAssetBase,
+    ),
+    fileViewerExtensions: JSON.stringify(fileViewerExtensions),
+    enableFileViewer:
+      values.enableFileViewer === true || (values.enableFileViewer == null && fallback.enableFileViewer === true),
+  };
+}
+
 export class PluginFilePreviewerKkfileviewServer extends Plugin {
   async load() {
     await this.db.import({
@@ -185,16 +262,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           // 读取首条配置记录，后续优先执行更新。
           const first = (list[0] || null) as KkfileviewSettingsRecord | null;
           // 生成归一化后的保存值，确保布尔与字符串字段都按当前前端输入覆盖旧值。
-          const nextValues = {
-            ...values,
-            nocobaseHost: String(values.nocobaseHost || '').trim(),
-            basemetasRequestType: values.basemetasRequestType === 'base64' ? 'base64' : 'query',
-            copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(String(values.copyEmbedHtmlPermission || ''))
-              ? String(values.copyEmbedHtmlPermission)
-              : 'user',
-            watermarkType: String(values.watermarkType || '').trim() === 'global' ? 'global' : 'preview',
-            watermark: String(values.watermark || '').trim(),
-          };
+          const nextValues = normalizeSettingsSaveValues(values, first || {});
           // 若已有配置记录，则直接覆盖更新，删除旧水印并保留最新前端输入。
           if (first?.id != null) {
             await repo.update({
@@ -902,6 +970,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           enableKkfileview: true,
           enableBasemetas: false,
           enableMicrosoft: true,
+          fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
+          fileViewerExtensions: JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
+          enableFileViewer: false,
           enablePrint: false,
           enableOpenInNewWindow: true,
           enableFullscreenButton: true,
@@ -939,6 +1010,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   private buildNormalizedValues(first: KkfileviewSettingsRecord) {
+    const normalizedSaveValues = normalizeSettingsSaveValues({}, first);
     const serviceType = first.serviceType === 'basemetas' ? 'basemetas' : 'kkfileview';
     const legacyHost = first.host || DEFAULT_KKFILEVIEW_HOST;
     const preferredPreview = first.preferredPreview || (first.preferKkfileview === false ? 'microsoft' : serviceType);
@@ -947,27 +1019,32 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       kkfileviewHost: first.kkfileviewHost || (serviceType === 'kkfileview' ? legacyHost : DEFAULT_KKFILEVIEW_HOST),
       basemetasHost: first.basemetasHost || (serviceType === 'basemetas' ? legacyHost : DEFAULT_BASEMETAS_HOST),
       microsoftHost: first.microsoftHost || DEFAULT_MICROSOFT_HOST,
-      nocobaseHost: first.nocobaseHost || '',
+      nocobaseHost: String(normalizedSaveValues.nocobaseHost || ''),
       extensions: first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
       kkfileviewExtensions: first.kkfileviewExtensions || first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
       basemetasExtensions: first.basemetasExtensions || first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
       microsoftExtensions: first.microsoftExtensions || JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS),
+      fileViewerAssetBase: String(normalizedSaveValues.fileViewerAssetBase || DEFAULT_FILE_VIEWER_ASSET_BASE),
+      fileViewerExtensions: String(
+        normalizedSaveValues.fileViewerExtensions || JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
+      ),
       enableKkfileview: first.enableKkfileview ?? true,
       enableBasemetas: first.enableBasemetas ?? serviceType === 'basemetas',
       enableMicrosoft: first.enableMicrosoft ?? first.preferKkfileview === false,
+      enableFileViewer: normalizedSaveValues.enableFileViewer === true,
       enablePrint: first.enablePrint === true,
       enableOpenInNewWindow: first.enableOpenInNewWindow ?? true,
       enableFullscreenButton: first.enableFullscreenButton ?? true,
       enableMobileAutoFullscreen: first.enableMobileAutoFullscreen ?? false,
       enableDownload: first.enableDownload ?? true,
-      basemetasRequestType: first.basemetasRequestType === 'base64' ? 'base64' : 'query',
+      basemetasRequestType: normalizedSaveValues.basemetasRequestType === 'base64' ? 'base64' : 'query',
       enableCopyEmbedHtml: first.enableCopyEmbedHtml ?? true,
-      copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(first.copyEmbedHtmlPermission)
-        ? first.copyEmbedHtmlPermission
+      copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(String(normalizedSaveValues.copyEmbedHtmlPermission))
+        ? String(normalizedSaveValues.copyEmbedHtmlPermission)
         : 'user',
       copyEmbedHtmlRoles: first.copyEmbedHtmlRoles || '[]',
-      watermarkType: first.watermarkType || 'preview',
-      watermark: first.watermark || '',
+      watermarkType: String(normalizedSaveValues.watermarkType || 'preview'),
+      watermark: String(normalizedSaveValues.watermark || ''),
       preferKkfileview: first.preferKkfileview ?? false,
       preferredPreview: ['microsoft', 'kkfileview', 'basemetas', 'none'].includes(preferredPreview)
         ? preferredPreview

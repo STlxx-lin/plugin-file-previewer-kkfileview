@@ -1,20 +1,16 @@
-/**
- * @jsxRuntime classic
- * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
- */
-import './appDevDepsBridge';
-import { Plugin, attachmentFileTypes } from '@nocobase/client';
-import { filePreviewTypes } from '@nocobase/plugin-file-manager/client';
+import { Plugin } from '@nocobase/client-v2';
+import { filePreviewTypes } from '@nocobase/plugin-file-manager/client-v2';
+import { kkfileviewConfig, PREVIEW_SERVICE_REGISTRY, updateConfigCache } from '../client/configCache';
+import type { KkfileviewConfigRecord } from '../client/configCache';
+import { getFileExt, unwrapDataArray } from '../client/previewUtils';
+import { registerKkfileviewSettings } from '../client/settingsRegistration';
 import { SettingsPage } from './SettingsPage';
-import { KKFilePreviewer } from './KKFilePreviewer';
-import { kkfileviewConfig, PREVIEW_SERVICE_REGISTRY, updateConfigCache } from './configCache';
-import type { KkfileviewConfigRecord } from './configCache';
-import { getFileExt, unwrapDataArray } from './previewUtils';
 import { GlobalWatermarkProvider } from './GlobalWatermarkProvider';
-import { registerKkfileviewSettings } from './settingsRegistration';
+import { KKFilePreviewer } from './KKFilePreviewer';
 
 let configLoaded = false;
 let configLoading = false;
+
 type ApiClientLike = {
   request: (params: { url: string }) => Promise<unknown>;
 };
@@ -27,11 +23,8 @@ type PreviewFileLike = {
 let apiClientRef: ApiClientLike | null = null;
 
 function extractFirstSettingsRecord(payload: unknown): KkfileviewConfigRecord | undefined {
-  // 兼容 `data` 与 `data.data` 等多层包装结构，避免预览侧拿不到最新配置。
   const records = unwrapDataArray(payload);
-  // 没有任何记录时返回 undefined，让调用方保持原有兜底行为。
   if (records.length === 0) return undefined;
-  // 统一返回第一条配置记录。
   return records[0] as KkfileviewConfigRecord;
 }
 
@@ -78,7 +71,7 @@ const match = (file: PreviewFileLike) => {
   return extSet.has(ext);
 };
 
-export class PluginFilePreviewerKkfileviewClient extends Plugin {
+export class PluginFilePreviewerKkfileviewClientV2 extends Plugin {
   async load() {
     apiClientRef = this.app.apiClient;
     void syncConfigCacheFromServer();
@@ -90,10 +83,6 @@ export class PluginFilePreviewerKkfileviewClient extends Plugin {
       pluginNames: [this.options?.name, this.options?.packageName, 'file-previewer-kkfileview'],
     });
 
-    attachmentFileTypes.add({
-      match,
-      Previewer: KKFilePreviewer,
-    });
     filePreviewTypes.add({
       match,
       Previewer: KKFilePreviewer,
@@ -101,4 +90,4 @@ export class PluginFilePreviewerKkfileviewClient extends Plugin {
   }
 }
 
-export default PluginFilePreviewerKkfileviewClient;
+export default PluginFilePreviewerKkfileviewClientV2;

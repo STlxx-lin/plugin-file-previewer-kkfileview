@@ -1,9 +1,5 @@
-/**
- * @jsxRuntime classic
- * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
- */
 import React, { useEffect, useMemo, useState } from 'react';
-import { useAPIClient } from '@nocobase/client';
+import { useAPIClient } from './hooks';
 import { Form, message } from 'antd';
 import { useT } from './locale';
 import {
@@ -18,9 +14,9 @@ import {
     PreviewEngine,
     PreviewService,
     updateConfigCache,
-} from './configCache';
-import { buildFileViewerFormState, buildFileViewerSaveState, buildWatermarkSaveState } from './settingsPayload';
-import { parseExtensions, parseExtensionsInput, unwrapDataArray } from './previewUtils';
+} from '../client/configCache';
+import { buildFileViewerFormState, buildFileViewerSaveState, buildWatermarkSaveState } from '../client/settingsPayload';
+import { parseExtensions, parseExtensionsInput, unwrapDataArray } from '../client/previewUtils';
 import {
     AdvancedSettingsCard,
     BasicSettingsCard,
@@ -32,7 +28,7 @@ import {
     SettingsActivePanel,
     SettingsToolbar,
     SettingsWizard,
-} from './settingsSections';
+} from '../client/settingsSections';
 
 const WIZARD_DISMISSED_KEY = 'kkfileview.setup.wizard.dismissed';
 

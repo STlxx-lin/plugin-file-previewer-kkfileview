@@ -5,3 +5,5 @@ coverage
 .DS_Store
 *.log
 .env
+public/file-viewer/
+

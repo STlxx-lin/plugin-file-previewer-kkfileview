@@ -1,3 +1,7 @@
+/**
+ * @jsxRuntime classic
+ * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
+ */
 import React from 'react';
 import { AppstoreOutlined, SettingOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col } from 'antd';
@@ -43,11 +47,13 @@ const CHANGE_FIELD_LABEL_MAP: Record<string, string> = {
   kkfileviewHost: 'kkFileView 主机地址',
   basemetasHost: 'BaseMetas 服务地址',
   microsoftHost: '微软在线服务地址',
+  fileViewerAssetBase: 'File Viewer 资源基础路径',
   nocobaseHost: '系统公共访问地址',
   extensions: '文件格式',
   kkfileviewExtensions: 'kkFileView 文件格式',
   basemetasExtensions: 'BaseMetas 文件格式',
   microsoftExtensions: '微软在线文件格式',
+  fileViewerExtensions: 'File Viewer 文件格式',
   preferredPreview: '优先预览',
   basemetasRequestType: 'BaseMetas 请求类型',
   enablePrint: '打印按钮',
@@ -58,6 +64,7 @@ const CHANGE_FIELD_LABEL_MAP: Record<string, string> = {
   enableKkfileview: '启用 kkFileView',
   enableBasemetas: '启用 BaseMetas',
   enableMicrosoft: '启用微软在线',
+  enableFileViewer: '启用 File Viewer',
   watermarkType: '水印类型',
   watermark: '水印内容',
 };
@@ -151,39 +158,65 @@ const getHostLabel = (service: PreviewService) =>
     ? 'kkFileView Server Address'
     : service === 'basemetas'
       ? 'BaseMetas Server Address'
-      : 'Microsoft Server Address';
+      : service === 'fileViewer'
+        ? 'File Viewer Asset Base'
+        : 'Microsoft Server Address';
 
 const getHostPlaceholder = (service: PreviewService) =>
   service === 'kkfileview'
     ? 'e.g., http://127.0.0.1:8012'
     : service === 'basemetas'
       ? 'e.g., https://fileview.basemetas.cn'
-      : 'e.g., https://view.officeapps.live.com/op/embed.aspx';
+      : service === 'fileViewer'
+        ? 'Leave empty to resolve from runtime public path'
+        : 'e.g., https://view.officeapps.live.com/op/embed.aspx';
 
 const getExtensionLabel = (service: PreviewService) =>
   service === 'kkfileview'
     ? 'kkFileView File Formats'
     : service === 'basemetas'
       ? 'BaseMetas File Formats'
-      : 'Microsoft File Formats';
+      : service === 'fileViewer'
+        ? 'File Viewer File Formats'
+        : 'Microsoft File Formats';
 
 const getExtensionExtra = (service: PreviewService) =>
   service === 'kkfileview'
     ? 'Select file formats for kkFileView preview service'
     : service === 'basemetas'
       ? 'Select file formats for BaseMetas preview service'
-      : 'Select file formats for Microsoft online preview service';
+      : service === 'fileViewer'
+        ? 'Select file formats for File Viewer preview service'
+        : 'Select file formats for Microsoft online preview service';
 
-const buildHostRules = (t: Translation, validateServerUrl: (value?: string) => boolean) => [
-  { required: true, message: t('Please enter the server address') },
-  {
-    validator: async (_: unknown, value: string) => {
-      if (!validateServerUrl(value)) {
-        throw new Error(t('Please enter a valid URL with http or https'));
-      }
+const buildHostRules = (
+  service: PreviewService,
+  t: Translation,
+  validateServerUrl: (value?: string) => boolean,
+) => {
+  if (service === 'fileViewer') {
+    return [
+      {
+        validator: async (_: unknown, value: string) => {
+          const rawValue = String(value || '').trim();
+          if (!rawValue) return;
+          if (rawValue.startsWith('/') || validateServerUrl(rawValue)) return;
+          throw new Error(t('Please enter a valid File Viewer asset base'));
+        },
+      },
+    ];
+  }
+  return [
+    { required: true, message: t('Please enter the server address') },
+    {
+      validator: async (_: unknown, value: string) => {
+        if (!validateServerUrl(value)) {
+          throw new Error(t('Please enter a valid URL with http or https'));
+        }
+      },
     },
-  },
-];
+  ];
+};
 
 const buildExtensionRules = (t: Translation) => [
   {
@@ -211,11 +244,11 @@ const renderServiceHostField = (
     key={`${service.key}-host`}
     name={service.hostField}
     label={t(getHostLabel(service.key))}
-    rules={buildHostRules(t, validateServerUrl)}
+    rules={buildHostRules(service.key, t, validateServerUrl)}
   >
     <Input
       placeholder={t(getHostPlaceholder(service.key))}
-      addonAfter={(
+      addonAfter={service.key === 'fileViewer' ? undefined : (
         <Button
           type="link"
           size="small"
@@ -278,11 +311,11 @@ const renderAdvancedServiceConfigCard = (
       name={service.hostField}
       label={t(getHostLabel(service.key))}
       style={{ marginBottom: 10 }}
-      rules={buildHostRules(t, validateServerUrl)}
+      rules={buildHostRules(service.key, t, validateServerUrl)}
     >
       <Input
         placeholder={t(getHostPlaceholder(service.key))}
-        addonAfter={(
+        addonAfter={service.key === 'fileViewer' ? undefined : (
           <Button
             type="link"
             size="small"
@@ -705,7 +738,7 @@ export const AdvancedSettingsCard = ({
         type="secondary" // 使用次要说明文本样式
         style={{ marginBottom: 12 }} // 与下方表单项保持间距
       >
-        {t('Used to complete the full URL if the file attachment path is a relative path (e.g., /storage/uploads/...). If not provided, the current browser domain will be used.')} {/* 复用原有说明文案 */}
+        {t('Used to complete the full URL if the file attachment path is a relative path (e.g., /storage/uploads/...). If not provided, the current site runtime public path will be used automatically.')} {/* 未填写时改为说明会自动继承站点运行时公共路径 */}
       </Typography.Paragraph>
       <Form.Item
         name="nocobaseHost" // 绑定 NocoBase 服务器地址字段

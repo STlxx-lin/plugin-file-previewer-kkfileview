@@ -6,6 +6,8 @@ import {
   DEFAULT_KKFILEVIEW_HOST,
   DEFAULT_BASEMETAS_HOST,
   DEFAULT_MICROSOFT_HOST,
+  DEFAULT_FILE_VIEWER_ASSET_BASE,
+  DEFAULT_FILE_VIEWER_EXTENSIONS,
   DEFAULT_PREFERRED_PREVIEW,
 } from '../../shared/constants';
 
@@ -81,6 +83,21 @@ export default defineCollection({
             type: 'boolean',
             name: 'enableMicrosoft',
             defaultValue: true,
+        },
+        {
+            type: 'string',
+            name: 'fileViewerAssetBase', // File Viewer 资源基础路径字段
+            defaultValue: DEFAULT_FILE_VIEWER_ASSET_BASE,
+        },
+        {
+            type: 'text',
+            name: 'fileViewerExtensions', // File Viewer 支持扩展名字段，存储 JSON 字符串
+            defaultValue: JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
+        },
+        {
+            type: 'boolean',
+            name: 'enableFileViewer', // File Viewer 启用状态字段
+            defaultValue: false,
         },
         {
             type: 'boolean',

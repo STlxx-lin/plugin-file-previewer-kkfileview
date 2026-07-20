@@ -1,12 +1,8 @@
-/**
- * @jsxRuntime classic
- * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
- */
 import React, { useMemo, useRef } from 'react';
 import { Watermark } from 'antd';
-import { useCurrentUserContext } from '@nocobase/client';
-import { useKkfileviewConfig } from './useKkfileviewConfig';
-import { resolveWatermarkTemplate } from './watermarkTemplate';
+import { useCurrentUserContext } from './hooks';
+import { useKkfileviewConfig } from '../client/useKkfileviewConfig';
+import { resolveWatermarkTemplate } from '../client/watermarkTemplate';
 
 export const GlobalWatermarkProvider = (props: { children: React.ReactNode }) => {
   const { config: kkfileviewConfig, ready } = useKkfileviewConfig();
