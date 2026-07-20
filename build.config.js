@@ -1,22 +1,31 @@
 const path = require('path');
 const fs = require('fs-extra');
 
+async function copyToTargets(log) {
+  const source = path.resolve(__dirname, '../../../../node_modules/@file-viewer/web-full/dist');
+  const target = path.resolve(__dirname, './public/file-viewer');
+
+  log(`[copy-assets] Copying @file-viewer/web-full/dist from ${source} to ${target}...`);
+
+  if (!await fs.pathExists(source)) {
+    log(`[copy-assets] ERROR: Source path ${source} does not exist!`);
+    throw new Error(`Please ensure @file-viewer/web-full is installed in root node_modules.`);
+  }
+
+  await fs.ensureDir(target);
+  await fs.copy(source, target, { overwrite: true });
+  log('[copy-assets] Completed successfully!');
+}
+
 module.exports = {
   // beforeBuild 会在 nocobase-build 执行打包前被调用
   async beforeBuild(log) {
-    const source = path.resolve(__dirname, '../../../../node_modules/@file-viewer/web-full/dist');
-    const target = path.resolve(__dirname, './public/file-viewer');
+    await copyToTargets(log);
+  },
 
-    log(`[beforeBuild] Copying @file-viewer/web-full/dist from ${source} to ${target}...`);
-
-    if (!await fs.pathExists(source)) {
-      log(`[beforeBuild] ERROR: Source path ${source} does not exist!`);
-      throw new Error(`Please ensure @file-viewer/web-full is installed in root node_modules.`);
-    }
-
-    await fs.ensureDir(target);
-    await fs.copy(source, target, { overwrite: true });
-    log('[beforeBuild] Copying static assets completed successfully!');
+  // afterBuild 会在 build 结束后被调用，防止打包工具 rimraf 清空输出
+  async afterBuild(log) {
+    await copyToTargets(log);
   },
 
   modifyTsupConfig(config) {

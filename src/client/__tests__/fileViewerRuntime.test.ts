@@ -12,8 +12,17 @@ describe('fileViewerRuntime', () => { // 定义 fileViewer 运行时工具测试
       __nocobase_public_path__: '/v/', // 提供带子路径前缀的运行时公共路径。
     } as Window & { __nocobase_public_path__?: string }); // 结束 window 模拟对象定义。
 
-    expect(resolveFileViewerAssetBase('')).toBe('http://localhost:13000/v/file-viewer/'); // 断言空配置会解析为带 `/v/` 前缀的默认资源地址。
+    expect(resolveFileViewerAssetBase('')).toBe('http://localhost:13000/v/static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/');
   }); // 结束运行时默认资源地址测试。
+
+  it('should resolve fileViewer asset base dynamically from webpack public path', () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'http://localhost:13000', href: 'http://localhost:13000/v/' },
+    });
+    vi.stubGlobal('__webpack_public_path__', '/static/plugins/@nocobase/plugin-file-previewer-kkfileview/dist/client/');
+
+    expect(resolveFileViewerAssetBase('')).toBe('http://localhost:13000/static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/');
+  });
 
   it('should preserve explicit configured asset base', () => { // 验证显式配置存在时保留该配置。
     expect(resolveFileViewerAssetBase('/custom/file-viewer/')).toBe('/custom/file-viewer/'); // 断言已规范化的显式地址会被原样保留。
