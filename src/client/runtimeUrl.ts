@@ -34,6 +34,7 @@ export function getRuntimePublicPath() {
 
 export function getRuntimePublicBase() {
   if (typeof window === 'undefined') return '';
+  if (!window.location) return ''; // 防御 SSR 或测试环境下 location 不可用的情况。
   const origin = window.location.origin;
   const publicPath = getRuntimePublicPath();
   if (publicPath === '/') return `${origin}/`;

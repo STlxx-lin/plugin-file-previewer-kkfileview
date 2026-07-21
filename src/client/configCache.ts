@@ -58,6 +58,7 @@ export type KkfileviewConfigRecord = Partial<{
     enableCopyEmbedHtml: boolean;
     copyEmbedHtmlPermission: EmbedCodePermission | string;
     copyEmbedHtmlRoles: unknown;
+    fileViewerDownloaded: boolean;
 }>;
 
 export const PREVIEW_SERVICE_REGISTRY = [
@@ -123,6 +124,7 @@ interface KkfileviewConfig {
     enableCopyEmbedHtml: boolean;
     copyEmbedHtmlPermission: EmbedCodePermission;
     copyEmbedHtmlRoles: string[];
+    fileViewerDownloaded: boolean;
 }
 
 export const kkfileviewConfig: KkfileviewConfig = {
@@ -151,6 +153,7 @@ export const kkfileviewConfig: KkfileviewConfig = {
     enableCopyEmbedHtml: true,
     copyEmbedHtmlPermission: 'user',
     copyEmbedHtmlRoles: [],
+    fileViewerDownloaded: false,
 };
 
 function parseRoleList(value: unknown): string[] {
@@ -230,6 +233,7 @@ export function updateConfigCache(record?: KkfileviewConfigRecord | null) {
         ? record.copyEmbedHtmlPermission
         : 'user';
     kkfileviewConfig.copyEmbedHtmlRoles = parseRoleList(record.copyEmbedHtmlRoles);
+    kkfileviewConfig.fileViewerDownloaded = record.fileViewerDownloaded === true;
 
     const preferredPreview = record.preferredPreview || 'microsoft';
     kkfileviewConfig.preferredPreview = isPreviewEngine(preferredPreview)

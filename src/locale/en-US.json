@@ -117,6 +117,9 @@
     "Preview not supported for this file type. Please download and view it locally.": "Preview not supported for this file type. Please download and view it locally.",
     "Iframe preview failed. Please open in a new window or download the file.": "Iframe preview failed. Please open in a new window or download the file.",
     "Retry Preview": "Retry Preview",
+    "File Viewer component failed to load. The CDN (unpkg.com) may be unreachable in your network environment.": "File Viewer component failed to load. The CDN (unpkg.com) may be unreachable in your network environment.",
+    "To use offline mode, please go to plugin settings and download the local static files.": "To use offline mode, please go to plugin settings and download the local static files.",
+    "Go to Settings": "Go to Settings",
     "kkFileView is loading preview...": "kkFileView is loading preview...",
     "kkFileView File Formats": "kkFileView File Formats",
     "BaseMetas File Formats": "BaseMetas File Formats",
@@ -154,5 +157,14 @@
     "Migrate legacy fields to new fields when missing, then clear legacy compatibility fields.": "Migrate legacy fields to new fields when missing, then clear legacy compatibility fields.",
     "Not executed yet": "Not executed yet",
     "Cleanup completed": "Cleanup completed",
-    "Cleanup failed": "Cleanup failed"
+    "Cleanup failed": "Cleanup failed",
+    "Static files ready (Local Mode)": "Static files ready (Local Mode)",
+    "Static files missing (CDN Mode)": "Static files missing (CDN Mode)",
+    "Re-download": "Re-download",
+    "Download Static Files": "Download Static Files",
+    "Local static files will be served first. No external internet connection is required for File Viewer.": "Local static files will be served first. No external internet connection is required for File Viewer.",
+    "Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.": "Requires copying/downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.",
+    "Static files downloaded/copied successfully": "Static files downloaded/copied successfully",
+    "Failed to download File Viewer static files": "Failed to download File Viewer static files",
+    "Loading preview component...": "Loading preview component..."
 }

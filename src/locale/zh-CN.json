@@ -28,6 +28,9 @@
   "Preview not supported for this file type. Please download and view it locally.": "不支持预览该文件类型，请下载后查看。",
   "Iframe preview failed. Please open in a new window or download the file.": "内嵌预览加载失败，请在新窗口打开或下载后查看。",
   "Retry Preview": "重试预览",
+  "File Viewer component failed to load. The CDN (unpkg.com) may be unreachable in your network environment.": "File Viewer 组件加载失败，CDN（unpkg.com）可能在当前网络环境中无法访问。",
+  "To use offline mode, please go to plugin settings and download the local static files.": "如需离线使用，请前往插件设置页面下载本地静态文件。",
+  "Go to Settings": "前往设置",
   "kkFileView is loading preview...": "kkFileView 正在加载预览...",
   "kkFileView File Formats": "kkFileView 文件格式",
   "BaseMetas File Formats": "BaseMetas 文件格式",
@@ -154,5 +157,14 @@
   "Migrate legacy fields to new fields when missing, then clear legacy compatibility fields.": "当新字段缺失时先迁移旧字段，再清空旧兼容字段。",
   "Not executed yet": "尚未执行",
   "Cleanup completed": "清理完成",
-  "Cleanup failed": "清理失败"
+  "Cleanup failed": "清理失败",
+  "Static files ready (Local Mode)": "静态文件已就绪 (本地模式)",
+  "Static files missing (CDN Mode)": "静态文件未下载 (CDN 模式)",
+  "Re-download": "重新提取",
+  "Download Static Files": "下载静态文件",
+  "Local static files will be served first. No external internet connection is required for File Viewer.": "优先使用本地静态文件。开启 File Viewer 后无需公网网络连接。",
+  "Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.": "需要提取/下载约 170MB 的静态资源以在本地运行。未下载时将自动兜底使用 unpkg CDN 模式。",
+  "Static files downloaded/copied successfully": "静态文件下载/提取成功",
+  "Failed to download File Viewer static files": "提取 File Viewer 静态文件失败",
+  "Loading preview component...": "正在加载预览组件..."
 }

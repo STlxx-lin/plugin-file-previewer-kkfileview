@@ -223,6 +223,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.registerModificationRecordsResource();
     this.registerPreviewRecordsResource();
     this.registerFieldCleanupResource();
+    this.registerFileViewerDownloadResource();
+    this.registerSettingsListResource();
     this.app.acl.allow('kkfileviewSettings', 'list', 'loggedIn');
     this.app.acl.allow('kkfileviewSettingsSave', 'save', 'loggedIn');
     this.app.acl.allow('kkfileviewHealthCheck', 'check', 'loggedIn');
@@ -236,6 +238,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.app.acl.allow('kkfileviewPreviewRecords', 'remove', 'loggedIn');
     this.app.acl.allow('kkfileviewPreviewRecords', 'clear', 'loggedIn');
     this.app.acl.allow('kkfileviewFieldCleanup', 'run', 'loggedIn');
+    this.app.acl.allow('kkfileviewFileViewerDownload', 'download', 'loggedIn');
 
     await this.db.sync({ force: false, alter: { drop: false } });
     await this.ensureDefaultRecord();
@@ -1050,6 +1053,92 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
         ? preferredPreview
         : DEFAULT_PREFERRED_PREVIEW,
     };
+  }
+
+  private registerFileViewerDownloadResource() {
+    if (this.app.resourceManager.isDefined('kkfileviewFileViewerDownload')) {
+      return;
+    }
+    this.app.resourceManager.define({
+      name: 'kkfileviewFileViewerDownload',
+      actions: {
+        download: async (ctx: ActionContext) => {
+          const fs = require('fs-extra');
+          try {
+            let packageDir = '';
+            try {
+              packageDir = path.dirname(require.resolve('@file-viewer/web-full/package.json'));
+            } catch (err) {
+              const rootNodeModules = path.resolve(__dirname, '../../../../node_modules/@file-viewer/web-full');
+              if (await fs.pathExists(rootNodeModules)) {
+                packageDir = rootNodeModules;
+              } else {
+                throw new Error('未在 node_modules 中找到 @file-viewer/web-full 依赖包，请在项目根目录下运行命令安装：yarn add @file-viewer/web-full');
+              }
+            }
+
+            const sourceDir = path.join(packageDir, 'dist');
+            const targetDir = path.resolve(__dirname, '../../public/file-viewer');
+
+            if (!await fs.pathExists(sourceDir)) {
+              ctx.status = 400;
+              ctx.body = {
+                data: {
+                  success: false,
+                  message: `Source directory ${sourceDir} does not exist.`,
+                }
+              };
+              return;
+            }
+
+            await fs.ensureDir(targetDir);
+            await fs.copy(sourceDir, targetDir, { overwrite: true });
+
+            ctx.body = {
+              data: {
+                success: true,
+                message: 'Dependencies downloaded/copied successfully',
+              }
+            };
+          } catch (error: any) {
+            ctx.status = 500;
+            ctx.body = {
+              data: {
+                success: false,
+                message: error.message || 'Failed to copy dependencies',
+              }
+            };
+          }
+        }
+      }
+    });
+  }
+
+  private registerSettingsListResource() {
+    this.app.resourceManager.define({
+      name: 'kkfileviewSettings',
+      actions: {
+        list: async (ctx: ActionContext) => {
+          const repo = ctx.db.getRepository('kkfileviewSettings');
+          const rows = await repo.find({ sort: ['createdAt'] });
+          const list = Array.isArray(rows) ? rows : [];
+          
+          const fs = require('fs-extra');
+          const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
+          const isDownloaded = await fs.pathExists(filePath);
+          
+          const result = list.map(item => {
+            const data = item.toJSON ? item.toJSON() : { ...item };
+            data.fileViewerDownloaded = isDownloaded;
+            return data;
+          });
+          
+          ctx.body = {
+            data: result,
+          };
+        }
+      }
+    });
   }
 }
 

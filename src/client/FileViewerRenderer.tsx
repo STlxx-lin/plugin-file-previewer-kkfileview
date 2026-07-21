@@ -30,8 +30,10 @@ export type FileViewerRendererProps = { // 导出 File Viewer 渲染组件属性
   fileName: string; // 声明文件名属性。
   /** 可选：调用方提供的认证下载函数，用于让库通过认证渠道获取受保护的文件内容。 */
   fetchFile?: FileViewerFetchFileFn; // 声明可选的认证下载函数属性。
+  fileViewerDownloaded?: boolean; // 声明是否已下载本地依赖属性。
   onReady?: () => void; // 声明加载成功回调属性。
   onError?: (error: Error) => void; // 声明加载失败回调属性。
+  onProgress?: (percent: number) => void; // 声明可选的加载进度回调属性。
 }; // 结束组件属性类型定义。
 
 function cleanupViewerController(controller: FileViewerController | null | undefined, host: HTMLDivElement | null) { // 定义统一清理控制器和宿主的内部工具。
@@ -45,44 +47,71 @@ function cleanupViewerController(controller: FileViewerController | null | undef
 // 全局缓存已经加载完的 script 状态。
 const scriptLoadCache = new Map<string, Promise<void>>();
 
-function loadScriptOnce(src: string): Promise<void> {
-  let promise = scriptLoadCache.get(src);
-  if (!promise) {
-    promise = new Promise<void>((resolve, reject) => {
-      const existingScript = document.querySelector(`script[src="${src}"]`);
-      if (existingScript) {
-        resolve();
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = src;
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => {
-        scriptLoadCache.delete(src); // 加载失败时允许下一次重新加载。
-        reject(new Error(`Failed to load script: ${src}`));
-      };
-      document.body.appendChild(script);
-    });
-    scriptLoadCache.set(src, promise);
+function loadScriptWithProgress(src: string, onProgress?: (percent: number) => void): Promise<void> {
+  const cached = scriptLoadCache.get(src);
+  if (cached) {
+    onProgress?.(100);
+    return cached;
   }
+
+  const promise = new Promise<void>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+    if (existingScript) {
+      onProgress?.(100);
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+
+    // 25 秒超时保护
+    const timer = setTimeout(() => {
+      script.onload = null;
+      script.onerror = null;
+      if (script.parentNode) script.parentNode.removeChild(script);
+      scriptLoadCache.delete(src);
+      console.error('[loadScriptWithProgress] Timeout loading script:', src);
+      reject(new Error(`Script loading timed out: ${src}`));
+    }, 25000);
+
+    script.onload = () => {
+      clearTimeout(timer);
+      onProgress?.(100);
+      resolve();
+    };
+
+    script.onerror = (e) => {
+      clearTimeout(timer);
+      if (script.parentNode) script.parentNode.removeChild(script);
+      scriptLoadCache.delete(src);
+      console.error('[loadScriptWithProgress] Script onerror fired for:', src, e);
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+
+    document.body.appendChild(script);
+  });
+
+  scriptLoadCache.set(src, promise);
   return promise;
 }
 
 export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 File Viewer 渲染组件。
-  const { assetBase, fileUrl, fileName, fetchFile, onReady, onError } = props; // 解构组件所需的核心属性与回调。
+  const { assetBase, fileUrl, fileName, fetchFile, fileViewerDownloaded, onReady, onError, onProgress } = props; // 解构组件所需的核心属性与回调。
   const hostRef = useRef<HTMLDivElement>(null); // 创建宿主容器引用以供挂载 Viewer。
 
   const fetchFileRef = useRef(fetchFile);
   const onReadyRef = useRef(onReady);
   const onErrorRef = useRef(onError);
+  const onProgressRef = useRef(onProgress);
 
   useEffect(() => {
     fetchFileRef.current = fetchFile;
     onReadyRef.current = onReady;
     onErrorRef.current = onError;
-  }, [fetchFile, onReady, onError]);
+    onProgressRef.current = onProgress;
+  }, [fetchFile, onReady, onError, onProgress]);
 
   useEffect(() => { // 在资源路径或文件信息变化时重新挂载 Viewer。
     let disposed = false; // 定义卸载标记，避免异步完成后重复操作。
@@ -95,11 +124,16 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
 
     const mount = async () => { // 定义异步挂载流程。
       try { // 捕获动态加载或挂载过程中的运行异常。
-        const resolvedAssetBase = resolveFileViewerAssetBase(assetBase); // 解析最终生效 of 资源基址。
+        const resolvedAssetBase = resolveFileViewerAssetBase(assetBase, fileViewerDownloaded); // 解析最终生效 of 资源基址。
         
         // 动态加载 UMD/IIFE 打包好的静态 JS 资源，而不是由打包器静态编译，以绕过打包器编译错误
         const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
-        await loadScriptOnce(scriptUrl);
+
+        await loadScriptWithProgress(scriptUrl, (percent) => {
+          if (!disposed) {
+            onProgressRef.current?.(percent);
+          }
+        });
 
         if (disposed) return;
 
@@ -163,7 +197,7 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
       disposed = true; // 标记组件已卸载，阻止异步流程继续更新状态。
       cleanupViewerController(controller, host); // 调用统一清理工具释放控制器与宿主 DOM。
     }; // 结束 effect 清理逻辑定义。
-  }, [assetBase, fileUrl, fileName]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
+  }, [assetBase, fileUrl, fileName, fileViewerDownloaded]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
 
   return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />; // 返回占满可用空间的宿主容器供 File Viewer 挂载。
 } // 结束 File Viewer 渲染组件定义。

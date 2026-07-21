@@ -119,6 +119,9 @@ type AdvancedProps = {
   visible: boolean;
   watermark: string;
   watermarkType: 'global' | 'preview';
+  fileViewerDownloaded?: boolean;
+  downloadingFileViewer?: boolean;
+  onDownloadFileViewer?: () => void;
 };
 
 type HistoryProps = {
@@ -293,6 +296,9 @@ const renderAdvancedServiceConfigCard = (
   validateServerUrl: (value?: string) => boolean,
   onTestConnection: (service: PreviewService) => void,
   testingServices: Record<PreviewService, boolean>,
+  fileViewerDownloaded?: boolean,
+  downloadingFileViewer?: boolean,
+  onDownloadFileViewer?: () => void,
 ) => (
   <div
     key={`${service.key}-advanced-config-card`} // 使用服务 key 作为稳定的渲染键
@@ -346,6 +352,80 @@ const renderAdvancedServiceConfigCard = (
         }))}
       />
     </Form.Item>
+    {service.key === 'fileViewer' && (
+      <>
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes fileViewerPulse {
+            0% { transform: scale(0.95); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.5; }
+          }
+        `}} />
+        <div style={{
+          marginTop: 12,
+          padding: '12px 16px',
+          background: fileViewerDownloaded ? 'linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%)' : 'linear-gradient(135deg, #fffbe6 0%, #fff0f6 100%)',
+          border: fileViewerDownloaded ? '1px solid #b7eb8f' : '1px solid #ffe58f',
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          transition: 'all 0.3s ease',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {fileViewerDownloaded ? (
+                <>
+                  <span style={{
+                    display: 'inline-block',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: '#52c41a',
+                    boxShadow: '0 0 8px rgba(82, 196, 26, 0.6)',
+                  }} />
+                  <span style={{ color: '#2b7811' }}>{t('Static files ready (Local Mode)')}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{
+                    display: 'inline-block',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: '#faad14',
+                    boxShadow: '0 0 8px rgba(250, 173, 20, 0.6)',
+                    animation: 'fileViewerPulse 1.5s infinite',
+                  }} />
+                  <span style={{ color: '#b26b00' }}>{t('Static files missing (CDN Mode)')}</span>
+                </>
+              )}
+            </span>
+            <Button
+              type="primary"
+              size="small"
+              style={{
+                borderRadius: 6,
+                background: fileViewerDownloaded ? '#52c41a' : '#1890ff',
+                borderColor: fileViewerDownloaded ? '#52c41a' : '#1890ff',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              }}
+              loading={downloadingFileViewer}
+              onClick={onDownloadFileViewer}
+            >
+              {fileViewerDownloaded ? t('Re-download') : t('Download Static Files')}
+            </Button>
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: '1.4', margin: 0 }}>
+            {fileViewerDownloaded 
+              ? t('Local static files will be served first. No external internet connection is required for File Viewer.')
+              : t('Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.')
+            }
+          </Typography.Text>
+        </div>
+      </>
+    )}
   </div>
 );
 
@@ -717,6 +797,9 @@ export const AdvancedSettingsCard = ({
   visible,
   watermark,
   watermarkType,
+  fileViewerDownloaded,
+  downloadingFileViewer,
+  onDownloadFileViewer,
 }: AdvancedProps) => {
   // 将外部传入的水印类型归一化为预期枚举，避免异常值导致文案和状态错乱。
   const resolvedWatermarkType = watermarkType === 'global' ? 'global' : 'preview';
@@ -772,6 +855,9 @@ export const AdvancedSettingsCard = ({
               validateServerUrl,
               onTestConnection,
               testingServices,
+              fileViewerDownloaded,
+              downloadingFileViewer,
+              onDownloadFileViewer,
             )}
           </Col>
         ))}

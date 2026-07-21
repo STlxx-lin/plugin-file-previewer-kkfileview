@@ -59,6 +59,7 @@ type KkfileviewSettingsRecord = {
     copyEmbedHtmlRoles?: string | string[];
     watermarkType?: string;
     watermark?: string;
+    fileViewerDownloaded?: boolean;
 };
 
 type SettingsFormValues = {
@@ -337,6 +338,7 @@ export const SettingsPage = () => {
     const [cleanupMessage, setCleanupMessage] = useState('');
     const [watermarkDraft, setWatermarkDraft] = useState(''); // 单独维护水印草稿，避免表单异常时保存到旧值。
     const [watermarkTypeDraft, setWatermarkTypeDraft] = useState<'global' | 'preview'>('preview'); // 单独维护水印类型草稿，确保水印类型与文本始终同步。
+    const [downloadingFileViewer, setDownloadingFileViewer] = useState(false);
     const [serviceState, setServiceState] = useState<{
         enableKkfileview: boolean;
         enableBasemetas: boolean;
@@ -698,6 +700,32 @@ export const SettingsPage = () => {
             message.error(messageText);
         } finally {
             setCleanupLoading(false);
+        }
+    };
+
+    const handleDownloadFileViewer = async () => {
+        setDownloadingFileViewer(true);
+        try {
+            await api.request({
+                url: 'kkfileviewFileViewerDownload:download',
+                method: 'post',
+            });
+            message.success(t('Static files downloaded/copied successfully'));
+            // 重新请求设置列表刷新下载状态
+            const response = await api.request({
+                url: 'kkfileviewSettings:list',
+                skipNotify: true,
+            });
+            const refreshedRecords = extractSettingsRecords(response);
+            if (refreshedRecords.length > 0) {
+                setSettingsRecords(refreshedRecords);
+                updateConfigCache(refreshedRecords[0]);
+            }
+        } catch (error: any) {
+            console.error(error);
+            message.error(t('Failed to download File Viewer static files'));
+        } finally {
+            setDownloadingFileViewer(false);
         }
     };
 
@@ -1105,6 +1133,9 @@ export const SettingsPage = () => {
                     visible={!wizardVisible && activePanel === 'advanced'}
                     watermark={watermarkDraft}
                     watermarkType={watermarkTypeDraft}
+                    fileViewerDownloaded={currentRecord?.fileViewerDownloaded === true}
+                    downloadingFileViewer={downloadingFileViewer}
+                    onDownloadFileViewer={handleDownloadFileViewer}
                 />
 
                 <ModificationRecordsCard

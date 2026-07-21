@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAPIClient, useCurrentUserContext } from '@nocobase/client';
-import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin } from 'antd';
+import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress } from 'antd';
 import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
@@ -311,22 +311,30 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   const api = useAPIClient();
 
   // 用 NocoBase API 客户端权限凭证下载受保护的文件，避免 fileViewer 库裸 fetch 导致 404。
-  // 使用浏览器原生 fetch 以免受 Axios 拦截器对二进制响应格式的干扰。
+  // 注意：仅对同源/本站文件请求注入 NocoBase 认证头与 token 参数；外部 CDN 资源绝不注入自定义头，避免 CORS preflight 拦截。
   const fetchFileWithAuth = useCallback<FileViewerFetchFileFn>(async ({ url, signal }) => {
     try {
+      const isExternalCdn = /^https?:\/\//i.test(url) && (typeof window !== 'undefined' && window.location ? !url.startsWith(window.location.origin) : true);
+      let targetUrl = url;
       const headers: HeadersInit = {};
-      if (api.auth.token) {
-        headers['Authorization'] = `Bearer ${api.auth.token}`;
+      if (!isExternalCdn) {
+        if (api.auth.token) {
+          headers['Authorization'] = `Bearer ${api.auth.token}`;
+          if (!targetUrl.includes('token=')) {
+            const separator = targetUrl.includes('?') ? '&' : '?';
+            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(api.auth.token)}`;
+          }
+        }
+        if (api.auth.role) {
+          headers['X-Role'] = api.auth.role;
+        }
+        if (api.auth.authenticator) {
+          headers['X-Authenticator'] = api.auth.authenticator;
+        }
       }
-      if (api.auth.role) {
-        headers['X-Role'] = api.auth.role;
-      }
-      if (api.auth.authenticator) {
-        headers['X-Authenticator'] = api.auth.authenticator;
-      }
-      const resp = await fetch(url, { headers, signal });
+      const resp = await fetch(targetUrl, { headers, signal });
       if (!resp.ok) {
-        throw new Error(`Fetch failed with status ${resp.status}`);
+        throw new Error(`Fetch file failed with status ${resp.status}`);
       }
       return await resp.arrayBuffer(); // 直接读取并返回 ArrayBuffer。
     } catch (e) {
@@ -334,7 +342,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         throw e;
       }
       console.error('[fileViewer] fetch file error:', e);
-      return null; // 下载失败时返回 null，让库触发自身错误处理流程。
+      throw e; // 抛出异常以激活渲染器 onError 进入失败重试界面，避免无限卡死在 90%。
     }
   }, [api]); // 仅当 api 实例变化时重建回调。
   const fileDisplayTitle = useMemo(() => resolveFileDisplayTitle(file), [file?.title, file?.name, file?.filename, file?.originalname, file?.url]);
@@ -516,6 +524,8 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   const [iframeLoadFailed, setIframeLoadFailed] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
   const [iframeRetrySeed, setIframeRetrySeed] = useState(0);
+  const [fileViewerProgress, setFileViewerProgress] = useState<number>(0); // 声明 File Viewer 加载动画进度状态。
+  const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null); // 存储模拟进度定时器引用，用于在加载完成时清除。
   const iframeLoadedRef = useRef(false);
   const [embedConfigVisible, setEmbedConfigVisible] = useState(false);
   const [embedConfig, setEmbedConfig] = useState<EmbedHtmlConfig>(DEFAULT_EMBED_HTML_CONFIG);
@@ -568,11 +578,13 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         iframeLoadedRef.current = false; // 重置已加载标记。
         setIframeLoadFailed(false); // 清空加载失败状态。
         setIframeLoading(false); // 关闭加载中状态。
+        setFileViewerProgress(0); // 重置进度动画状态。
         return; // 提前结束当前 effect。
       } // 结束 fileViewer 不可预览保护分支。
       iframeLoadedRef.current = false; // 在重新挂载 fileViewer 前重置已加载标记。
       setIframeLoadFailed(false); // 在重新挂载 fileViewer 前清空失败状态。
       setIframeLoading(true); // 在 fileViewer 回调返回前展示加载中状态。
+      setFileViewerProgress(0); // 重置进度动画状态。
       return; // 跳过 iframe 专属超时逻辑。
     } // 结束 fileViewer 专属加载态分支。
     const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && Boolean(resolvedPreviewUrl); // 计算当前是否需要进入 iframe 加载监控逻辑。
@@ -595,6 +607,32 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   }, [resolvedPreviewUrl, previewMode, file?.url, unsupportedFile, fileMeta.isImg, iframeRetrySeed]);
   const showKkfileviewLoading = previewMode === 'kkfileview' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl;
   const showFileViewerLoading = previewMode === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
+
+  // 模拟进度动画：showFileViewerLoading 为 true 时启动缓慢递增定时器（0→90%），onReady 后跳到 100%。
+  // 由于 mountViewer 内部异步加载渲染引擎无进度回调，此动画是给用户提供视觉反馈的唯一可行方案。
+  useEffect(() => {
+    if (fileViewerProgressTimerRef.current) {
+      clearInterval(fileViewerProgressTimerRef.current); // 清除上一轮定时器，避免残留。
+      fileViewerProgressTimerRef.current = null;
+    }
+    if (!showFileViewerLoading) return; // 非加载中状态时不启动动画。
+    setFileViewerProgress(0); // 每次重新展示遮罩时从 0 开始。
+    // 每 200ms 触发一次，通过指数衰减使进度越接近 90% 递增越慢，给用户自然的等待感知。
+    fileViewerProgressTimerRef.current = setInterval(() => {
+      setFileViewerProgress((prev) => {
+        if (prev >= 90) return prev; // 模拟进度上限为 90%，留给 onReady 触发时跳到 100%。
+        const remaining = 90 - prev; // 计算距离上限的剩余空间。
+        const step = Math.max(0.5, remaining * 0.06); // 步长随剩余空间指数衰减（最小 0.5%），越接近 90% 越慢。
+        return Math.min(90, prev + step); // 防止超出上限。
+      });
+    }, 200);
+    return () => {
+      if (fileViewerProgressTimerRef.current) {
+        clearInterval(fileViewerProgressTimerRef.current);
+        fileViewerProgressTimerRef.current = null;
+      }
+    };
+  }, [showFileViewerLoading]);
 
   /** 智能打印处理 */
   const handlePrint = useCallback(() => {
@@ -931,15 +969,25 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
           ) : fileMeta.isImg ? (
             <img src={fileMeta.fullUrl} alt={fileDisplayTitle} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : iframeLoadFailed ? (
-            <Space direction="vertical" size={12} style={{ alignItems: 'center' }}>
-              <Typography.Text type="secondary">{t('Iframe preview failed. Please open in a new window or download the file.')}</Typography.Text>
-              <Space>
-                <Button onClick={handleRetryPreview}>{t('Retry Preview')}</Button>
-                {kkfileviewConfig.enableOpenInNewWindow !== false ? (
-                  <Button type="primary" onClick={handleOpenNewWindow}>{t('Open in new window')}</Button>
-                ) : null}
+            previewMode === 'fileViewer' ? (
+              <Space direction="vertical" size={12} style={{ alignItems: 'center', textAlign: 'center', maxWidth: 400, padding: '0 24px' }}>
+                <Typography.Text type="danger" strong>{t('File Viewer component failed to load. The CDN (unpkg.com) may be unreachable in your network environment.')}</Typography.Text>
+                <Typography.Text type="secondary">{t('To use offline mode, please go to plugin settings and download the local static files.')}</Typography.Text>
+                <Space>
+                  <Button onClick={handleRetryPreview}>{t('Retry Preview')}</Button>
+                </Space>
               </Space>
-            </Space>
+            ) : (
+              <Space direction="vertical" size={12} style={{ alignItems: 'center' }}>
+                <Typography.Text type="secondary">{t('Iframe preview failed. Please open in a new window or download the file.')}</Typography.Text>
+                <Space>
+                  <Button onClick={handleRetryPreview}>{t('Retry Preview')}</Button>
+                  {kkfileviewConfig.enableOpenInNewWindow !== false ? (
+                    <Button type="primary" onClick={handleOpenNewWindow}>{t('Open in new window')}</Button>
+                  ) : null}
+                </Space>
+              </Space>
+            )
           ) : previewMode === 'fileViewer' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}> {/* 为 fileViewer 提供稳定高度与相对定位容器。 */}
               <FileViewerRenderer
@@ -947,22 +995,44 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
                 fileUrl={fileMeta.fullUrl} // 传入已解析好的文件地址。
                 fileName={viewerFileName} // 传入已补全文件后缀的文件名提示。
                 fetchFile={fetchFileWithAuth} // 注入携带身份凭据的文件下载方法。
-                onReady={() => { // 在 fileViewer 成功挂载后关闭加载中态。
-                  iframeLoadedRef.current = true; // 标记 fileViewer 已成功完成首次挂载。
-                  setIframeLoadFailed(false); // 清空加载失败状态。
-                  setIframeLoading(false); // 关闭加载中状态。
+                fileViewerDownloaded={kkfileviewConfig.fileViewerDownloaded} // 注入是否已下载本地依赖标记。
+                onReady={() => { // 在 fileViewer 成功挂载后：先跳进度到 100%，再短暂延迟后关闭遮罩，让用户看到完成动画。
+                  if (fileViewerProgressTimerRef.current) { // 清除模拟进度定时器，停止递增。
+                    clearInterval(fileViewerProgressTimerRef.current);
+                    fileViewerProgressTimerRef.current = null;
+                  }
+                  setFileViewerProgress(100); // 跳到 100% 展示完成态。
+                  setTimeout(() => { // 短暂延迟后再关闭遮罩，让用户看到进度跳到 100% 的完成反馈。
+                    iframeLoadedRef.current = true; // 标记 fileViewer 已成功完成首次挂载。
+                    setIframeLoadFailed(false); // 清空加载失败状态。
+                    setIframeLoading(false); // 关闭加载中状态。
+                  }, 300);
                 }} // 结束 fileViewer 成功回调定义。
                 onError={() => { // 在 fileViewer 挂载失败时进入统一失败态。
+                  if (fileViewerProgressTimerRef.current) {
+                    clearInterval(fileViewerProgressTimerRef.current);
+                    fileViewerProgressTimerRef.current = null;
+                  }
                   iframeLoadedRef.current = false; // 标记 fileViewer 未完成成功挂载。
                   setIframeLoadFailed(true); // 打开加载失败状态。
                   setIframeLoading(false); // 关闭加载中状态。
                 }} // 结束 fileViewer 失败回调定义。
               /> {/* 结束 FileViewer 原生渲染组件挂载。 */}
               {showFileViewerLoading ? (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.72)' }}>
-                  <Space direction="vertical" align="center" size={8}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.72)', zIndex: 10 }}>
+                  <Space direction="vertical" align="center" size={12}>
                     <Spin size="large" />
-                    <Typography.Text type="secondary">{t('File Viewer is loading preview...')}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {t('Loading preview component...')} {Math.floor(fileViewerProgress)}%
+                    </Typography.Text>
+                    <Progress
+                      percent={Math.floor(fileViewerProgress)}
+                      size="small"
+                      status={fileViewerProgress >= 100 ? 'success' : 'active'}
+                      style={{ width: 220 }}
+                      showInfo={false}
+                      strokeColor={{ from: '#1677ff', to: '#52c41a' }}
+                    />
                   </Space>
                 </div>
               ) : null}
