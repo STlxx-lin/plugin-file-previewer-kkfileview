@@ -20,12 +20,18 @@ async function copyToTargets(log) {
 module.exports = {
   // beforeBuild 会在 nocobase-build 执行打包前被调用
   async beforeBuild(log) {
-    await copyToTargets(log);
-  },
-
-  // afterBuild 会在 build 结束后被调用，防止打包工具 rimraf 清空输出
-  async afterBuild(log) {
-    await copyToTargets(log);
+    const target = path.resolve(__dirname, './public/file-viewer');
+    if (process.env.BUILD_FULL === 'true') {
+      log('[build] BUILD_FULL is enabled. Embedding file-viewer static assets...');
+      await copyToTargets(log);
+    } else {
+      // 确保打包前 public/file-viewer 目录已被清理，避免误打包大体积静态文件
+      if (await fs.pathExists(target)) {
+        log(`[cleanup] Cleaning up legacy file-viewer static assets at ${target}...`);
+        await fs.remove(target);
+        log('[cleanup] Cleanup completed successfully!');
+      }
+    }
   },
 
   modifyTsupConfig(config) {
@@ -43,6 +49,16 @@ module.exports = {
 
   modifyRsbuildConfig(config) {
     const next = { ...config };
+    
+    // 注入全局环境变量 Define，用于让客户端感知当前构建是轻量版还是完整版
+    next.source = {
+      ...next.source,
+      define: {
+        ...next.source?.define,
+        'process.env.BUILD_FULL': JSON.stringify(process.env.BUILD_FULL === 'true'),
+      },
+    };
+
     const originalRspack = next.tools?.rspack;
 
     next.tools = {

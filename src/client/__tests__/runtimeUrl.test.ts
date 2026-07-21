@@ -21,9 +21,9 @@ describe('runtimeUrl', () => {
     expect(getRuntimePublicBase()).toBe('http://localhost:3000/v/');
   });
 
-  it('resolveFileUrl 应该为相对附件地址自动补上运行时公共路径', () => {
+  it('resolveFileUrl 应该为相对附件地址自动补上运行时公共路径并剥离前端路由前缀', () => {
     window.__nocobase_public_path__ = '/v/';
-    expect(resolveFileUrl('/storage/uploads/demo.docx')).toBe('http://localhost:3000/v/storage/uploads/demo.docx');
+    expect(resolveFileUrl('/storage/uploads/demo.docx')).toBe('http://localhost:3000/storage/uploads/demo.docx');
   });
 
   it('resolveFileUrl 应该在根路径场景下保持原有补全结果', () => {
@@ -31,10 +31,10 @@ describe('runtimeUrl', () => {
     expect(resolveFileUrl('/storage/uploads/demo.docx')).toBe('http://localhost:3000/storage/uploads/demo.docx');
   });
 
-  it('resolveFileUrl 应该优先使用手工配置的 nocobaseHost', () => {
+  it('resolveFileUrl 应该优先使用手工配置的 nocobaseHost 并剥离前端路由前缀', () => {
     window.__nocobase_public_path__ = '/v/';
     expect(resolveFileUrl('/storage/uploads/demo.docx', 'http://localhost:13000/v')).toBe(
-      'http://localhost:13000/v/storage/uploads/demo.docx',
+      'http://localhost:13000/storage/uploads/demo.docx',
     );
   });
 

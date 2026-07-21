@@ -5,6 +5,20 @@
 import React, { useEffect, useRef } from 'react'; // 引入 React 及其副作用和引用能力。
 import { resolveFileViewerAssetBase } from './fileViewerRuntime'; // 引入 File Viewer 资源基址解析工具。
 
+/** 与 @file-viewer/web ViewerFetchInput 结构对齐的最小入参类型，避免静态引入 SDK 包。 */
+export type FileViewerFetchInput = {
+  url: string; // 待下载的文件地址。
+  signal?: AbortSignal; // 可选取消信号，用于组件卸载时中断正在进行的下载请求。
+};
+
+/**
+ * 调用方注入的认证下载函数签名。
+ * 返回 ArrayBuffer（或 Blob/File）供 fileViewer 渲染；返回 null/undefined 则退回库默认行为。
+ */
+export type FileViewerFetchFileFn = (
+  input: FileViewerFetchInput,
+) => Promise<ArrayBuffer | Blob | File | null | undefined>;
+
 type FileViewerController = { // 定义可能返回的控制器对象形状。
   destroy?: () => void; // 声明控制器可能提供的销毁方法。
   unmount?: () => void; // 声明控制器可能提供的卸载方法。
@@ -13,7 +27,9 @@ type FileViewerController = { // 定义可能返回的控制器对象形状。
 export type FileViewerRendererProps = { // 导出 File Viewer 渲染组件属性类型。
   assetBase: string; // 声明资源基址属性。
   fileUrl: string; // 声明文件地址属性。
-  fileName: string; // 声明文件名属性.
+  fileName: string; // 声明文件名属性。
+  /** 可选：调用方提供的认证下载函数，用于让库通过认证渠道获取受保护的文件内容。 */
+  fetchFile?: FileViewerFetchFileFn; // 声明可选的认证下载函数属性。
   onReady?: () => void; // 声明加载成功回调属性。
   onError?: (error: Error) => void; // 声明加载失败回调属性。
 }; // 结束组件属性类型定义。
@@ -26,7 +42,7 @@ function cleanupViewerController(controller: FileViewerController | null | undef
   } // 结束宿主节点清理分支。
 } // 结束控制器统一清理工具定义。
 
-// 全局缓存已经加载完的 script 状态
+// 全局缓存已经加载完的 script 状态。
 const scriptLoadCache = new Map<string, Promise<void>>();
 
 function loadScriptOnce(src: string): Promise<void> {
@@ -44,7 +60,7 @@ function loadScriptOnce(src: string): Promise<void> {
       script.async = true;
       script.onload = () => resolve();
       script.onerror = () => {
-        scriptLoadCache.delete(src); // 加载失败时允许下一次重新加载
+        scriptLoadCache.delete(src); // 加载失败时允许下一次重新加载。
         reject(new Error(`Failed to load script: ${src}`));
       };
       document.body.appendChild(script);
@@ -55,8 +71,18 @@ function loadScriptOnce(src: string): Promise<void> {
 }
 
 export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 File Viewer 渲染组件。
-  const { assetBase, fileUrl, fileName, onReady, onError } = props; // 解构组件所需的核心属性与回调。
+  const { assetBase, fileUrl, fileName, fetchFile, onReady, onError } = props; // 解构组件所需的核心属性与回调。
   const hostRef = useRef<HTMLDivElement>(null); // 创建宿主容器引用以供挂载 Viewer。
+
+  const fetchFileRef = useRef(fetchFile);
+  const onReadyRef = useRef(onReady);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    fetchFileRef.current = fetchFile;
+    onReadyRef.current = onReady;
+    onErrorRef.current = onError;
+  }, [fetchFile, onReady, onError]);
 
   useEffect(() => { // 在资源路径或文件信息变化时重新挂载 Viewer。
     let disposed = false; // 定义卸载标记，避免异步完成后重复操作。
@@ -91,25 +117,43 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
 
         setAssetBase?.(resolvedAssetBase); // 当模块支持时先设置全局资源基址，确保离线资产走自部署路径。
 
-        controller = (mountViewer(host, { // 调用官方挂载函数将 Viewer 装载到宿主容器。
-          url: fileUrl, // 传入待预览文件地址。
-          filename: fileName, // 传入文件名以辅助格式识别与展示。
-          options: { // 传入最小化运行参数以提升宿主稳定性。
-            styleIsolation: 'shadow', // 使用 Shadow DOM 隔离后台全局样式干扰。
-          }, // 结束最小运行参数定义。
-        }) || null) as FileViewerController | null; // 保存返回的控制器对象，便于后续清理。
+        /**
+         * coreOptions.fetchFile 是 @file-viewer/web 提供的扩展点，允许调用方
+         * 拦截库内部的文件 fetch 行为，改为使用携带认证 token 的自定义下载函数。
+         * 返回 ArrayBuffer/Blob/File 均被接受；返回 null/undefined 则退回库的默认 fetch 逻辑。
+         */
+        const coreOptions = fetchFileRef.current
+          ? {
+              fetchFile: async (input: { url: string; signal?: AbortSignal }) => {
+                // 将调用方注入 of 认证下载函数包装为符合库签名 of fetchFile 回调。
+                return fetchFileRef.current?.({ url: input.url, signal: input.signal }) ?? null;
+              },
+            }
+          : undefined; // 当调用方未提供 fetchFile 时不注入 coreOptions，使用库默认行为。
+
+        controller = (mountViewer(
+          host, // 宿主容器。
+          { // ViewerMountOptions
+            url: fileUrl, // 传入待预览文件地址。
+            filename: fileName, // 传入文件名以辅助格式识别与展示。
+            options: { // 传入最小化运行参数以提升宿主稳定性。
+              styleIsolation: 'shadow', // 使用 Shadow DOM 隔离后台全局样式干扰。
+            }, // 结束最小运行参数定义。
+          },
+          coreOptions, // 可选：注入认证下载函数，覆盖库内部的裸 fetch 行为。
+        ) || null) as FileViewerController | null; // 保存返回的控制器对象，便于后续清理。
 
         if (disposed) { // 当异步挂载完成前组件已经卸载时立即清理刚创建的实例。
           cleanupViewerController(controller, host); // 调用统一清理工具释放资源与 DOM。
           return; // 结束当前挂载流程，避免触发成功回调。
         } // 结束卸载后补清理分支。
 
-        onReady?.(); // 在挂载成功后通知宿主关闭加载态。
+        onReadyRef.current?.(); // 在挂载成功后通知宿主关闭加载态。
       } catch (error) { // 处理动态导入或挂载时的所有异常。
         if (disposed) { // 当组件已卸载时忽略后续异常通知。
           return; // 结束当前异常处理分支.
         } // 结束已卸载保护分支。
-        onError?.(error instanceof Error ? error : new Error('fileViewer mount failed')); // 向宿主回传标准化错误对象。
+        onErrorRef.current?.(error instanceof Error ? error : new Error('fileViewer mount failed')); // 向宿主回传标准化错误对象。
       } // 结束异步挂载异常处理。
     }; // 结束异步挂载函数定义。
 
@@ -119,7 +163,7 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
       disposed = true; // 标记组件已卸载，阻止异步流程继续更新状态。
       cleanupViewerController(controller, host); // 调用统一清理工具释放控制器与宿主 DOM。
     }; // 结束 effect 清理逻辑定义。
-  }, [assetBase, fileUrl, fileName, onReady, onError]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
+  }, [assetBase, fileUrl, fileName]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
 
   return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />; // 返回占满可用空间的宿主容器供 File Viewer 挂载。
 } // 结束 File Viewer 渲染组件定义。

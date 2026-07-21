@@ -48,7 +48,21 @@ export function resolveFileUrl(rawUrl: string = '', fallbackHost: string = '') {
     if (typeof window === 'undefined') return normalizedUrl;
     return `${window.location.protocol}${normalizedUrl}`;
   }
-  const resolvedBase = normalizeBaseHost(fallbackHost) || getRuntimePublicBase();
+  let resolvedBase = normalizeBaseHost(fallbackHost) || getRuntimePublicBase();
+  if (resolvedBase) {
+    try {
+      const parsed = new URL(resolvedBase);
+      const modernPrefix = typeof window !== 'undefined' ? (window as any).__nocobase_modern_client_prefix__ || 'v' : 'v';
+      if (parsed.pathname.endsWith(`/${modernPrefix}/`)) {
+        parsed.pathname = parsed.pathname.slice(0, -modernPrefix.length - 1);
+      } else if (parsed.pathname.endsWith(`/${modernPrefix}`)) {
+        parsed.pathname = parsed.pathname.slice(0, -modernPrefix.length);
+      }
+      resolvedBase = parsed.toString();
+    } catch {
+      // fallback
+    }
+  }
   if (!resolvedBase) return normalizedUrl;
   return new URL(normalizedUrl.replace(/^\/+/, ''), resolvedBase).toString();
 }

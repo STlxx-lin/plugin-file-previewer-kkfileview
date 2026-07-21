@@ -10,6 +10,13 @@ export function resolveFileViewerAssetBase(rawBase: string = '') { // 导出 Fil
     return ensureTrailingSlash(explicit); // 返回补齐末尾斜杠后的显式资源路径。
   } // 结束显式配置优先分支。
 
-  // 零配置默认兜底路径：使用规范的插件静态资源托管路径，保证在任何开发态和生产态下都能通过代理或直连成功读取，免遭 HMR 开发服务拦截
-  return new URL('static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/', getRuntimePublicBase()).toString();
+  // 零配置默认兜底路径：根据构建版本类型（由 process.env.BUILD_FULL 决定）决定是使用本地内置资源还是公共 CDN
+  if (process.env.BUILD_FULL) {
+    const origin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
+    const base = origin ? `${origin}/` : getRuntimePublicBase();
+    return new URL('static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/', base).toString();
+  }
+
+  // 默认从 unpkg 公共 CDN 加载 @file-viewer/web-full 的静态资源，以优化插件包自身体积
+  return 'https://unpkg.com/@file-viewer/web-full@2.2.2/dist/';
 } // 结束 File Viewer 资源基址解析函数定义。

@@ -10,7 +10,7 @@ import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { useT } from './locale';
 import { decidePreviewMode, getFileExt, parseExtensions } from './previewUtils';
-import { FileViewerRenderer } from './FileViewerRenderer';
+import { FileViewerRenderer, FileViewerFetchFileFn } from './FileViewerRenderer';
 import {
   EmbedCodePermission,
   PREVIEW_SERVICE_REGISTRY,
@@ -309,6 +309,34 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   const isOpen = typeof open === 'boolean' ? open : index !== null && index !== undefined;
   const t = useT();
   const api = useAPIClient();
+
+  // 用 NocoBase API 客户端权限凭证下载受保护的文件，避免 fileViewer 库裸 fetch 导致 404。
+  // 使用浏览器原生 fetch 以免受 Axios 拦截器对二进制响应格式的干扰。
+  const fetchFileWithAuth = useCallback<FileViewerFetchFileFn>(async ({ url, signal }) => {
+    try {
+      const headers: HeadersInit = {};
+      if (api.auth.token) {
+        headers['Authorization'] = `Bearer ${api.auth.token}`;
+      }
+      if (api.auth.role) {
+        headers['X-Role'] = api.auth.role;
+      }
+      if (api.auth.authenticator) {
+        headers['X-Authenticator'] = api.auth.authenticator;
+      }
+      const resp = await fetch(url, { headers, signal });
+      if (!resp.ok) {
+        throw new Error(`Fetch failed with status ${resp.status}`);
+      }
+      return await resp.arrayBuffer(); // 直接读取并返回 ArrayBuffer。
+    } catch (e) {
+      if (e && (e as any).name === 'AbortError') {
+        throw e;
+      }
+      console.error('[fileViewer] fetch file error:', e);
+      return null; // 下载失败时返回 null，让库触发自身错误处理流程。
+    }
+  }, [api]); // 仅当 api 实例变化时重建回调。
   const fileDisplayTitle = useMemo(() => resolveFileDisplayTitle(file), [file?.title, file?.name, file?.filename, file?.originalname, file?.url]);
 
   // #3 优化：直接读取全局配置缓存，不再每次触发 useRequest
@@ -370,6 +398,15 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     const ext = getFileExt(file?.url || '', file?.extname || '');
     return { fullUrl, isImg, isPdf, ext };
   }, [file?.url, file?.extname, kkfileviewConfig.nocobaseHost]);
+
+  // 生成传递给 fileViewer 的文件名。如果展示标题中缺少文件真实扩展名，则自动补齐，以便库正确识别文件类型。
+  const viewerFileName = useMemo(() => {
+    const title = fileDisplayTitle || 'file';
+    if (fileMeta.ext && !title.toLowerCase().endsWith(`.${fileMeta.ext.toLowerCase()}`)) {
+      return `${title}.${fileMeta.ext}`;
+    }
+    return title;
+  }, [fileDisplayTitle, fileMeta.ext]);
 
   // #4 优化：移除多余的 fileMeta.fullUrl 依赖
   const watermarkText = useMemo(
@@ -908,7 +945,8 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
               <FileViewerRenderer
                 assetBase={kkfileviewConfig.fileViewerAssetBase} // 传入 fileViewer 资源基础路径配置。
                 fileUrl={fileMeta.fullUrl} // 传入已解析好的文件地址。
-                fileName={fileDisplayTitle} // 传入展示标题作为文件名提示。
+                fileName={viewerFileName} // 传入已补全文件后缀的文件名提示。
+                fetchFile={fetchFileWithAuth} // 注入携带身份凭据的文件下载方法。
                 onReady={() => { // 在 fileViewer 成功挂载后关闭加载中态。
                   iframeLoadedRef.current = true; // 标记 fileViewer 已成功完成首次挂载。
                   setIframeLoadFailed(false); // 清空加载失败状态。
