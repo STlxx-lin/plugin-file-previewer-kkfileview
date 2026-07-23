@@ -12,21 +12,32 @@ export function parseExtensions(raw: any, fallback: string[]) {
     const normalized = normalizeExtensions(raw as string[]);
     return normalized.length > 0 ? normalized : normalizeExtensions(fallback);
   }
+  const str = String(raw).trim();
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(str);
     if (Array.isArray(parsed)) {
       const normalized = normalizeExtensions(parsed as string[]);
       return normalized.length > 0 ? normalized : normalizeExtensions(fallback);
     }
   } catch { }
-  return normalizeExtensions(fallback);
+  const splitted = normalizeExtensions(str.split(/[,，;；\s]+/));
+  return splitted.length > 0 ? splitted : normalizeExtensions(fallback);
 }
 
 export function parseExtensionsInput(input: string | string[] = '') {
   if (Array.isArray(input)) {
     return normalizeExtensions(input);
   }
-  return normalizeExtensions(String(input).split(','));
+  const str = String(input || '').trim();
+  if (str.startsWith('[') && str.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed)) {
+        return normalizeExtensions(parsed);
+      }
+    } catch {}
+  }
+  return normalizeExtensions(str.split(/[,，;；\s]+/));
 }
 
 export function unwrapDataArray(payload: unknown, depth = 0): Array<Record<string, unknown>> {

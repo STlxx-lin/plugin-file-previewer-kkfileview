@@ -32,6 +32,7 @@ import {
     SettingsActivePanel,
     SettingsToolbar,
     SettingsWizard,
+    DownloadProgressState,
 } from './settingsSections';
 
 const WIZARD_DISMISSED_KEY = 'kkfileview.setup.wizard.dismissed';
@@ -100,6 +101,26 @@ type ServiceHealthPayload = {
     reachable?: boolean;
     mode?: string;
     status?: number;
+};
+
+const extractProgressData = (payload: any): DownloadProgressState | null => {
+    if (!payload) return null;
+    let current = payload;
+    for (let i = 0; i < 5; i++) {
+        if (!current || typeof current !== 'object') break;
+        if (current.progress && typeof current.progress === 'object') {
+            current = current.progress;
+        }
+        if (typeof current.percent === 'number' || (typeof current.status === 'string' && current.status !== '200')) {
+            return current as DownloadProgressState;
+        }
+        if (current.data) {
+            current = current.data;
+        } else {
+            break;
+        }
+    }
+    return null;
 };
 
 const extractSettingsRecords = (payload: unknown): KkfileviewSettingsRecord[] => {
@@ -343,6 +364,7 @@ export const SettingsPage = () => {
     const [watermarkDraft, setWatermarkDraft] = useState(''); // 单独维护水印草稿，避免表单异常时保存到旧值。
     const [watermarkTypeDraft, setWatermarkTypeDraft] = useState<'global' | 'preview'>('preview'); // 单独维护水印类型草稿，确保水印类型与文本始终同步。
     const [downloadingFileViewer, setDownloadingFileViewer] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState<DownloadProgressState | null>(null);
     const [serviceState, setServiceState] = useState<{
         enableKkfileview: boolean;
         enableBasemetas: boolean;
@@ -709,11 +731,54 @@ export const SettingsPage = () => {
 
     const handleDownloadFileViewer = async () => {
         setDownloadingFileViewer(true);
+        setDownloadProgress({
+            status: 'searching',
+            percent: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            speedBytesPerSec: 0,
+            speedText: '0 KB/s',
+            downloadedText: '0 B',
+            totalText: '进行中',
+            message: t('Preparing to extract static files...'),
+        });
+
+        const timer = setInterval(async () => {
+            try {
+                const res = await api.request({
+                    url: 'kkfileviewFileViewerDownload:progress',
+                    method: 'get',
+                    skipNotify: true,
+                });
+                const prog = extractProgressData(res);
+                if (prog && prog.status) {
+                    setDownloadProgress(prog);
+                }
+            } catch {}
+        }, 300);
+
         try {
-            await api.request({
+            const res = await api.request({
                 url: 'kkfileviewFileViewerDownload:download',
                 method: 'post',
             });
+            const resData = extractProgressData(res) as any;
+            const finalProg = resData?.progress || resData;
+            if (finalProg && finalProg.percent !== undefined) {
+                setDownloadProgress(finalProg);
+            } else {
+                setDownloadProgress({
+                    status: 'completed',
+                    percent: 100,
+                    downloadedBytes: 0,
+                    totalBytes: 0,
+                    speedBytesPerSec: 0,
+                    speedText: '0 KB/s',
+                    downloadedText: '完成',
+                    totalText: '完成',
+                    message: t('Static files downloaded/copied successfully'),
+                });
+            }
             message.success(t('Static files downloaded/copied successfully'));
             // 重新请求设置列表刷新下载状态
             const response = await api.request({
@@ -731,7 +796,11 @@ export const SettingsPage = () => {
             const detailMsg = serverMessage ? `: ${serverMessage}` : '';
             message.error(`${t('Failed to download File Viewer static files')}${detailMsg}`);
         } finally {
+            clearInterval(timer);
             setDownloadingFileViewer(false);
+            setTimeout(() => {
+                setDownloadProgress(null);
+            }, 3000);
         }
     };
 
@@ -1142,6 +1211,7 @@ export const SettingsPage = () => {
                     fileViewerDownloaded={currentRecord?.fileViewerDownloaded === true}
                     downloadingFileViewer={downloadingFileViewer}
                     onDownloadFileViewer={handleDownloadFileViewer}
+                    downloadProgress={downloadProgress}
                 />
 
                 <ModificationRecordsCard

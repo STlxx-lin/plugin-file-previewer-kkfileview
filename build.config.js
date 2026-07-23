@@ -1,14 +1,37 @@
 const path = require('path');
 const fs = require('fs-extra');
 
+async function findDistDir() {
+  try {
+    const pkgPath = require.resolve('@file-viewer/web-full/package.json');
+    const distDir = path.join(path.dirname(pkgPath), 'dist');
+    if (await fs.pathExists(distDir)) return distDir;
+  } catch {}
+
+  const startDirs = [__dirname, process.cwd()];
+  for (const startDir of startDirs) {
+    let curr = startDir;
+    while (curr) {
+      const candidate = path.join(curr, 'node_modules', '@file-viewer', 'web-full', 'dist');
+      if (await fs.pathExists(candidate)) {
+        return candidate;
+      }
+      const parent = path.dirname(curr);
+      if (parent === curr) break;
+      curr = parent;
+    }
+  }
+  return null;
+}
+
 async function copyToTargets(log) {
-  const source = path.resolve(__dirname, '../../../../node_modules/@file-viewer/web-full/dist');
+  const source = await findDistDir();
   const target = path.resolve(__dirname, './public/file-viewer');
 
   log(`[copy-assets] Copying @file-viewer/web-full/dist from ${source} to ${target}...`);
 
-  if (!await fs.pathExists(source)) {
-    log(`[copy-assets] ERROR: Source path ${source} does not exist!`);
+  if (!source || !await fs.pathExists(source)) {
+    log(`[copy-assets] ERROR: Source path @file-viewer/web-full/dist does not exist!`);
     throw new Error(`Please ensure @file-viewer/web-full is installed in root node_modules.`);
   }
 

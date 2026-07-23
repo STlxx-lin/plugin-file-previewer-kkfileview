@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { AppstoreOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col } from 'antd';
+import { Button, Card, Form, Input, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col, Progress } from 'antd';
 import type { FormInstance } from 'antd';
 import {
   DEFAULT_EXTENSIONS,
@@ -19,6 +19,19 @@ import { parseExtensionsInput } from './previewUtils';
 type Translation = (key: string) => string;
 
 export type SettingsActivePanel = 'basic' | 'advanced' | 'history' | 'previewRecords' | 'cleanup';
+
+export type DownloadProgressState = {
+  status: 'idle' | 'searching' | 'downloading' | 'extracting' | 'copying' | 'completed' | 'error';
+  percent: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  speedBytesPerSec: number;
+  speedText: string;
+  downloadedText: string;
+  totalText: string;
+  message: string;
+  error?: string;
+};
 
 export type ModificationRecordItem = {
   key: string;
@@ -122,6 +135,7 @@ type AdvancedProps = {
   fileViewerDownloaded?: boolean;
   downloadingFileViewer?: boolean;
   onDownloadFileViewer?: () => void;
+  downloadProgress?: DownloadProgressState | null;
 };
 
 type HistoryProps = {
@@ -299,6 +313,7 @@ const renderAdvancedServiceConfigCard = (
   fileViewerDownloaded?: boolean,
   downloadingFileViewer?: boolean,
   onDownloadFileViewer?: () => void,
+  downloadProgress?: DownloadProgressState | null,
 ) => (
   <div
     key={`${service.key}-advanced-config-card`} // 使用服务 key 作为稳定的渲染键
@@ -424,6 +439,45 @@ const renderAdvancedServiceConfigCard = (
             }
           </Typography.Text>
         </div>
+
+        {downloadProgress && (downloadingFileViewer || (downloadProgress.status && downloadProgress.status !== 'idle')) && (
+          <div style={{
+            marginTop: 10,
+            padding: '10px 14px',
+            background: '#fafafa',
+            border: '1px solid #e8e8e8',
+            borderRadius: 6,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Typography.Text style={{ fontSize: 12 }} type="secondary">
+                {downloadProgress.message || t('Downloading static files...')}
+              </Typography.Text>
+              {downloadProgress.speedText && downloadProgress.speedText !== '0 KB/s' && (
+                <Typography.Text style={{ fontSize: 12, color: '#1890ff' }} strong>
+                  ⚡ {downloadProgress.speedText}
+                </Typography.Text>
+              )}
+            </div>
+            <Progress
+              percent={downloadProgress.percent || 0}
+              status={downloadProgress.status === 'error' ? 'exception' : downloadProgress.percent === 100 ? 'success' : 'active'}
+              strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
+              size="small"
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: '#8c8c8c' }}>
+              <span>
+                {(!downloadProgress.totalText || downloadProgress.totalText === '未知' || downloadProgress.totalText === '0 B')
+                  ? `${t('Downloaded')}: ${downloadProgress.downloadedText || '0 B'}`
+                  : `${t('Downloaded')}: ${downloadProgress.downloadedText || '0 B'} / ${downloadProgress.totalText}`}
+              </span>
+            </div>
+            {downloadProgress.error && (
+              <Typography.Text type="danger" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                {downloadProgress.error}
+              </Typography.Text>
+            )}
+          </div>
+        )}
       </>
     )}
   </div>
@@ -800,6 +854,7 @@ export const AdvancedSettingsCard = ({
   fileViewerDownloaded,
   downloadingFileViewer,
   onDownloadFileViewer,
+  downloadProgress,
 }: AdvancedProps) => {
   // 将外部传入的水印类型归一化为预期枚举，避免异常值导致文案和状态错乱。
   const resolvedWatermarkType = watermarkType === 'global' ? 'global' : 'preview';
@@ -858,6 +913,7 @@ export const AdvancedSettingsCard = ({
               fileViewerDownloaded,
               downloadingFileViewer,
               onDownloadFileViewer,
+              downloadProgress,
             )}
           </Col>
         ))}

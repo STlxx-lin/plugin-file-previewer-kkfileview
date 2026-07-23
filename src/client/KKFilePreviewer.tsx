@@ -74,7 +74,7 @@ function getServiceEnabledFallback(
 ) {
   if (service.key === 'kkfileview') return kkfileviewConfig.enableKkfileview ?? true; // 当服务为 kkfileview 时按既有默认值启用。
   if (service.key === 'basemetas') return kkfileviewConfig.enableBasemetas ?? false; // 当服务为 basemetas 时按既有默认值关闭。
-  if (service.key === 'fileViewer') return kkfileviewConfig.enableFileViewer ?? false; // 当服务为 fileViewer 时按计划默认关闭。
+  if (service.key === 'fileViewer') return kkfileviewConfig.enableFileViewer ?? true; // 当服务为 fileViewer 时默认启用。
   return kkfileviewConfig.enableMicrosoft ?? true; // 其余服务回退到微软预览默认启用策略。
 } // 结束服务启用态回退值解析工具定义。
 

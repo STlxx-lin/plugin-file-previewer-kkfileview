@@ -93,6 +93,8 @@ type ActionContext = {
   db: any;
   status?: number;
   body?: any;
+  set?: (key: string, val: string) => void;
+  type?: string;
 };
 
 type ModificationLogRow = {
@@ -124,6 +126,41 @@ type ModificationLogRow = {
   model?: string;
   actionPath?: string;
 };
+
+export interface FileViewerDownloadProgress {
+  status: 'idle' | 'searching' | 'downloading' | 'extracting' | 'copying' | 'completed' | 'error';
+  percent: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  speedBytesPerSec: number;
+  speedText: string;
+  downloadedText: string;
+  totalText: string;
+  message: string;
+  error?: string;
+  updatedAt: number;
+}
+
+let globalDownloadProgress: FileViewerDownloadProgress = {
+  status: 'idle',
+  percent: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
+  speedBytesPerSec: 0,
+  speedText: '0 KB/s',
+  downloadedText: '0 B',
+  totalText: '0 B',
+  message: '',
+  updatedAt: Date.now(),
+};
+
+function formatProgressBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+}
 
 function getActionValues(ctx: ActionContext): Record<string, unknown> {
   return ctx?.action?.params?.values || ctx?.request?.body || {};
@@ -207,12 +244,62 @@ export function normalizeSettingsSaveValues(
     ),
     fileViewerExtensions: JSON.stringify(fileViewerExtensions),
     enableFileViewer:
-      values.enableFileViewer === true || (values.enableFileViewer == null && fallback.enableFileViewer === true),
+      values.enableFileViewer === true ||
+      (values.enableFileViewer !== false && fileViewerExtensions.length > 0),
   };
 }
 
 export class PluginFilePreviewerKkfileviewServer extends Plugin {
   async load() {
+    const servePublicFile = async (ctx: any, next: () => Promise<any>) => {
+      const apiPrefix = '/api/kkfileviewPublicAssets/';
+      const publicPrefix = '/static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/';
+      const directPrefix = '/static/plugins/@nocobase/plugin-file-previewer-kkfileview/';
+      let relPath = '';
+      if (ctx.path && ctx.path.startsWith(apiPrefix)) {
+        relPath = ctx.path.substring(apiPrefix.length);
+      } else if (ctx.path && ctx.path.startsWith(publicPrefix)) {
+        relPath = ctx.path.substring(publicPrefix.length);
+      } else if (ctx.path && ctx.path.startsWith(directPrefix) && !ctx.path.includes('/dist/')) {
+        relPath = ctx.path.substring(directPrefix.length);
+      }
+
+      if (relPath) {
+        const fs = require('fs-extra');
+        const targetFile = path.resolve(__dirname, '../../public', relPath);
+        if (await fs.pathExists(targetFile)) {
+          const stat = await fs.stat(targetFile);
+          if (stat.isFile()) {
+            ctx.status = 200;
+            ctx.set('Access-Control-Allow-Origin', '*');
+            ctx.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+            ctx.set('Cache-Control', 'public, max-age=31536000');
+            const ext = path.extname(targetFile).toLowerCase();
+            if (ext === '.js') {
+              ctx.type = 'application/javascript; charset=utf-8';
+            } else if (ext === '.css') {
+              ctx.type = 'text/css; charset=utf-8';
+            } else if (ext === '.json') {
+              ctx.type = 'application/json; charset=utf-8';
+            } else if (ext === '.wasm') {
+              ctx.type = 'application/wasm';
+            } else {
+              ctx.type = ext;
+            }
+            ctx.body = await fs.readFile(targetFile);
+            return;
+          }
+        }
+      }
+      await next();
+    };
+
+    if (Array.isArray((this.app as any).middleware)) {
+      (this.app as any).middleware.unshift(servePublicFile);
+    } else {
+      this.app.use(servePublicFile);
+    }
+
     await this.db.import({
       directory: path.resolve(__dirname, 'collections'),
     });
@@ -225,6 +312,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.registerFieldCleanupResource();
     this.registerFileViewerDownloadResource();
     this.registerSettingsListResource();
+    this.registerPublicAssetsResource();
+    this.app.acl.allow('kkfileviewPublicAssets', 'get', 'public');
     this.app.acl.allow('kkfileviewSettings', 'list', 'loggedIn');
     this.app.acl.allow('kkfileviewSettingsSave', 'save', 'loggedIn');
     this.app.acl.allow('kkfileviewHealthCheck', 'check', 'loggedIn');
@@ -238,7 +327,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.app.acl.allow('kkfileviewPreviewRecords', 'remove', 'loggedIn');
     this.app.acl.allow('kkfileviewPreviewRecords', 'clear', 'loggedIn');
     this.app.acl.allow('kkfileviewFieldCleanup', 'run', 'loggedIn');
-    this.app.acl.allow('kkfileviewFileViewerDownload', 'download', 'loggedIn');
+    this.app.acl.allow('kkfileviewFileViewerDownload', ['download', 'progress'], 'loggedIn');
 
     await this.db.sync({ force: false, alter: { drop: false } });
     await this.ensureDefaultRecord();
@@ -704,7 +793,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           // 读取当前登录用户，用于统一解析水印模板变量。
           const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
           const fileUrl = String(values.url || '').trim();
-          
+
           // 如果没有提供 url，返回错误
           if (!fileUrl) {
             ctx.status = 400;
@@ -715,20 +804,20 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             };
             return;
           }
-          
+
           try {
             // 获取数据库中的 kkFileView 配置
             const repo = ctx.db.getRepository('kkfileviewSettings');
             const rows = await repo.find({ sort: ['createdAt'] });
             const settings = (rows?.[0] || {}) as HealthCheckSettings;
-            
+
             // 获取 kkFileView 服务地址
             const host = settings.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST;
             // 将文件地址进行 Base64 编码
             const encodedUrl = Buffer.from(fileUrl).toString('base64');
             // 拼接基础预览地址
             let previewUrl = `${host.replace(/\/$/, '')}/onlinePreview?url=${encodeURIComponent(encodedUrl)}`;
-            
+
             // 先按前端一致的规则解析水印模板变量，确保不同入口的水印文本完全一致。
             const resolvedWatermark = resolveWatermarkTemplate(String(settings.watermark || ''), {
               user: currentUser,
@@ -739,7 +828,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             if (normalizedWatermarkType === 'preview' && resolvedWatermark) {
               previewUrl += `&watermarkTxt=${encodeURIComponent(resolvedWatermark)}`;
             }
-            
+
             // 返回生成的预览地址
             ctx.body = {
               data: {
@@ -975,7 +1064,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           enableMicrosoft: true,
           fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
           fileViewerExtensions: JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
-          enableFileViewer: false,
+          enableFileViewer: true,
           enablePrint: false,
           enableOpenInNewWindow: true,
           enableFullscreenButton: true,
@@ -1034,7 +1123,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       enableKkfileview: first.enableKkfileview ?? true,
       enableBasemetas: first.enableBasemetas ?? serviceType === 'basemetas',
       enableMicrosoft: first.enableMicrosoft ?? first.preferKkfileview === false,
-      enableFileViewer: normalizedSaveValues.enableFileViewer === true,
+      enableFileViewer: normalizedSaveValues.enableFileViewer !== false,
       enablePrint: first.enablePrint === true,
       enableOpenInNewWindow: first.enableOpenInNewWindow ?? true,
       enableFullscreenButton: first.enableFullscreenButton ?? true,
@@ -1055,30 +1144,265 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     };
   }
 
-  private registerFileViewerDownloadResource() {
-    if (this.app.resourceManager.isDefined('kkfileviewFileViewerDownload')) {
-      return;
+  private async findOrDownloadFileViewerDist(targetDir: string): Promise<string> {
+    const fs = require('fs-extra');
+
+    globalDownloadProgress = {
+      status: 'searching',
+      percent: 5,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      speedBytesPerSec: 0,
+      speedText: '0 KB/s',
+      downloadedText: '0 B',
+      totalText: '0 B',
+      message: '正在检测本地 node_modules 依赖包...',
+      updatedAt: Date.now(),
+    };
+
+    // 1. 尝试 require.resolve
+    try {
+      const pkgPath = require.resolve('@file-viewer/web-full/package.json');
+      const distDir = path.join(path.dirname(pkgPath), 'dist');
+      if (await fs.pathExists(distDir)) {
+        globalDownloadProgress = {
+          ...globalDownloadProgress,
+          status: 'copying',
+          percent: 95,
+          message: '已找到本地依赖包，正在复制静态文件...',
+          updatedAt: Date.now(),
+        };
+        return distDir;
+      }
+    } catch { }
+
+    try {
+      const mainPath = require.resolve('@file-viewer/web-full');
+      const distDir = path.join(path.dirname(mainPath), 'dist');
+      if (await fs.pathExists(distDir)) {
+        globalDownloadProgress = {
+          ...globalDownloadProgress,
+          status: 'copying',
+          percent: 95,
+          message: '已找到本地依赖包，正在复制静态文件...',
+          updatedAt: Date.now(),
+        };
+        return distDir;
+      }
+    } catch { }
+
+    // 2. 向上递归搜索 node_modules/@file-viewer/web-full/dist
+    const startDirs = [__dirname, process.cwd()];
+    for (const startDir of startDirs) {
+      let curr = startDir;
+      while (curr) {
+        const candidate = path.join(curr, 'node_modules', '@file-viewer', 'web-full', 'dist');
+        if (await fs.pathExists(candidate)) {
+          globalDownloadProgress = {
+            ...globalDownloadProgress,
+            status: 'copying',
+            percent: 95,
+            message: '已找到本地依赖包，正在复制静态文件...',
+            updatedAt: Date.now(),
+          };
+          return candidate;
+        }
+        const parent = path.dirname(curr);
+        if (parent === curr) break;
+        curr = parent;
+      }
     }
+
+    // 3. 在线 Fallback 下载解压
+    const https = require('https');
+    const http = require('http');
+    const { exec } = require('child_process');
+
+    const urls = [
+      'https://registry.npmmirror.com/@file-viewer/web-full/-/web-full-2.2.2.tgz',
+      'https://registry.npmjs.org/@file-viewer/web-full/-/web-full-2.2.2.tgz'
+    ];
+
+    const tmpDir = path.join(os.tmpdir(), `file-viewer-download-${Date.now()}`);
+    await fs.ensureDir(tmpDir);
+    const tgzPath = path.join(tmpDir, 'package.tgz');
+    const extractDir = path.join(tmpDir, 'extracted');
+    await fs.ensureDir(extractDir);
+
+    let downloaded = false;
+    let lastErr: Error | null = null;
+
+    const axios = require('axios');
+    const downloadFile = async (urlStr: string, destPath: string): Promise<void> => {
+      globalDownloadProgress = {
+        status: 'downloading',
+        percent: 10,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        speedBytesPerSec: 0,
+        speedText: '0 KB/s',
+        downloadedText: '0 B',
+        totalText: '连接中...',
+        message: '正在建立连接下载静态资源包...',
+        updatedAt: Date.now(),
+      };
+
+      const response = await axios({
+        method: 'get',
+        url: urlStr,
+        responseType: 'stream',
+        timeout: 30000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+        },
+        maxRedirects: 5,
+      });
+
+      const totalHeader = response.headers['content-length'];
+      const totalBytes = totalHeader ? parseInt(totalHeader, 10) : 0;
+      let downloadedBytes = 0;
+      let lastTime = Date.now();
+      let lastDownloadedBytes = 0;
+
+      globalDownloadProgress = {
+        status: 'downloading',
+        percent: 15,
+        downloadedBytes: 0,
+        totalBytes,
+        speedBytesPerSec: 0,
+        speedText: '0 KB/s',
+        downloadedText: '0 B',
+        totalText: totalBytes > 0 ? formatProgressBytes(totalBytes) : '未知',
+        message: '连接成功，开始下载数据包...',
+        updatedAt: Date.now(),
+      };
+
+      const fileStream = fs.createWriteStream(destPath);
+
+      response.data.on('data', (chunk: any) => {
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        const timeDiff = now - lastTime;
+        if (timeDiff >= 300 || (totalBytes > 0 && downloadedBytes === totalBytes)) {
+          const bytesDiff = downloadedBytes - lastDownloadedBytes;
+          const speed = (bytesDiff / Math.max(1, timeDiff)) * 1000;
+          lastTime = now;
+          lastDownloadedBytes = downloadedBytes;
+          const percent = totalBytes > 0 ? Math.min(99, Math.round((downloadedBytes / totalBytes) * 100)) : 50;
+
+          globalDownloadProgress = {
+            status: 'downloading',
+            percent,
+            downloadedBytes,
+            totalBytes,
+            speedBytesPerSec: speed,
+            speedText: `${formatProgressBytes(speed)}/s`,
+            downloadedText: formatProgressBytes(downloadedBytes),
+            totalText: totalBytes > 0 ? formatProgressBytes(totalBytes) : '未知',
+            message: `正在从镜像源下载静态资源包 (${formatProgressBytes(speed)}/s)...`,
+            updatedAt: Date.now(),
+          };
+        }
+      });
+
+      response.data.pipe(fileStream);
+
+      await new Promise<void>((resolve, reject) => {
+        fileStream.on('finish', () => resolve());
+        fileStream.on('error', (err: any) => {
+          fs.unlink(destPath, () => { });
+          reject(err);
+        });
+        response.data.on('error', (err: any) => {
+          fs.unlink(destPath, () => { });
+          reject(err);
+        });
+      });
+    };
+
+    for (const urlStr of urls) {
+      try {
+        await downloadFile(urlStr, tgzPath);
+        downloaded = true;
+        break;
+      } catch (e: any) {
+        lastErr = e;
+      }
+    }
+
+    if (!downloaded) {
+      await fs.remove(tmpDir).catch(() => { });
+      const errMsg = `本地未检测到 @file-viewer/web-full 依赖，且在线下载失败: ${lastErr?.message || '未知网络错误'}`;
+      globalDownloadProgress = {
+        ...globalDownloadProgress,
+        status: 'error',
+        message: errMsg,
+        updatedAt: Date.now(),
+      };
+      throw new Error(errMsg);
+    }
+
+    // 解压 tgz 包
+    globalDownloadProgress = {
+      ...globalDownloadProgress,
+      status: 'extracting',
+      percent: 92,
+      speedText: '0 KB/s',
+      message: '资源包下载完成，正在解压静态文件...',
+      updatedAt: Date.now(),
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      exec(`tar -xzf "${tgzPath}" -C "${extractDir}"`, (err: any) => {
+        if (err) return reject(new Error(`解压静态文件失败: ${err.message}`));
+        resolve();
+      });
+    });
+
+    const downloadedDist = path.join(extractDir, 'package', 'dist');
+    if (!await fs.pathExists(downloadedDist)) {
+      await fs.remove(tmpDir).catch(() => { });
+      throw new Error('解压产物中未找到 dist 目录');
+    }
+
+    globalDownloadProgress = {
+      ...globalDownloadProgress,
+      status: 'copying',
+      percent: 96,
+      message: '解压完成，正在将静态文件写入目标目录...',
+      updatedAt: Date.now(),
+    };
+
+    const finalTempDist = path.join(tmpDir, 'dist_ready');
+    await fs.copy(downloadedDist, finalTempDist);
+    return finalTempDist;
+  }
+
+  private registerFileViewerDownloadResource() {
     this.app.resourceManager.define({
       name: 'kkfileviewFileViewerDownload',
       actions: {
+        progress: async (ctx: ActionContext) => {
+          ctx.body = globalDownloadProgress;
+        },
         download: async (ctx: ActionContext) => {
+          globalDownloadProgress = {
+            status: 'searching',
+            percent: 5,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            speedBytesPerSec: 0,
+            speedText: '0 KB/s',
+            downloadedText: '0 B',
+            totalText: '进行中',
+            message: '正在检索本地依赖包及网络状态...',
+            updatedAt: Date.now(),
+          };
           const fs = require('fs-extra');
           try {
-            let packageDir = '';
-            try {
-              packageDir = path.dirname(require.resolve('@file-viewer/web-full/package.json'));
-            } catch (err) {
-              const rootNodeModules = path.resolve(__dirname, '../../../../node_modules/@file-viewer/web-full');
-              if (await fs.pathExists(rootNodeModules)) {
-                packageDir = rootNodeModules;
-              } else {
-                throw new Error('未在 node_modules 中找到 @file-viewer/web-full 依赖包，请在项目根目录下运行命令安装：yarn add @file-viewer/web-full');
-              }
-            }
-
-            const sourceDir = path.join(packageDir, 'dist');
             const targetDir = path.resolve(__dirname, '../../public/file-viewer');
+            const sourceDir = await this.findOrDownloadFileViewerDist(targetDir);
 
             if (!await fs.pathExists(sourceDir)) {
               ctx.status = 400;
@@ -1094,18 +1418,47 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             await fs.ensureDir(targetDir);
             await fs.copy(sourceDir, targetDir, { overwrite: true });
 
+            globalDownloadProgress = {
+              status: 'completed',
+              percent: 100,
+              downloadedBytes: globalDownloadProgress.totalBytes || globalDownloadProgress.downloadedBytes,
+              totalBytes: globalDownloadProgress.totalBytes,
+              speedBytesPerSec: 0,
+              speedText: '0 KB/s',
+              downloadedText: formatProgressBytes(globalDownloadProgress.downloadedBytes || globalDownloadProgress.totalBytes),
+              totalText: formatProgressBytes(globalDownloadProgress.totalBytes),
+              message: '静态文件提取与部署完成',
+              updatedAt: Date.now(),
+            };
+
             ctx.body = {
               data: {
                 success: true,
                 message: 'Dependencies downloaded/copied successfully',
+                progress: globalDownloadProgress,
               }
             };
           } catch (error: any) {
+            globalDownloadProgress = {
+              status: 'error',
+              percent: 0,
+              downloadedBytes: 0,
+              totalBytes: 0,
+              speedBytesPerSec: 0,
+              speedText: '0 KB/s',
+              downloadedText: '0 B',
+              totalText: '0 B',
+              message: '静态文件提取失败',
+              error: error.message || 'Failed to copy dependencies',
+              updatedAt: Date.now(),
+            };
+
             ctx.status = 500;
             ctx.body = {
               data: {
                 success: false,
                 message: error.message || 'Failed to copy dependencies',
+                progress: globalDownloadProgress,
               }
             };
           }
@@ -1122,20 +1475,64 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           const repo = ctx.db.getRepository('kkfileviewSettings');
           const rows = await repo.find({ sort: ['createdAt'] });
           const list = Array.isArray(rows) ? rows : [];
-          
+
           const fs = require('fs-extra');
           const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
           const isDownloaded = await fs.pathExists(filePath);
-          
+
           const result = list.map(item => {
             const data = item.toJSON ? item.toJSON() : { ...item };
             data.fileViewerDownloaded = isDownloaded;
             return data;
           });
-          
+
           ctx.body = {
             data: result,
           };
+        }
+      }
+    });
+  }
+
+  private registerPublicAssetsResource() {
+    this.app.resourceManager.define({
+      name: 'kkfileviewPublicAssets',
+      actions: {
+        get: async (ctx: ActionContext) => {
+          const relPath = String((ctx.action?.params as any)?.file || (ctx as any).request?.query?.file || '').trim();
+          if (!relPath) {
+            ctx.status = 400;
+            ctx.body = { error: 'Missing file parameter' };
+            return;
+          }
+          const safeRel = path.normalize(relPath).replace(/^(\.\.[\/\\])+/, '');
+          const targetFile = path.resolve(__dirname, '../../public', safeRel);
+          const fs = require('fs-extra');
+          if (await fs.pathExists(targetFile)) {
+            const stat = await fs.stat(targetFile);
+            if (stat.isFile()) {
+              ctx.status = 200;
+              (ctx as any).set?.('Access-Control-Allow-Origin', '*');
+              (ctx as any).set?.('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+              (ctx as any).set?.('Cache-Control', 'public, max-age=31536000');
+              const ext = path.extname(targetFile).toLowerCase();
+              if (ext === '.js') {
+                (ctx as any).type = 'application/javascript; charset=utf-8';
+              } else if (ext === '.css') {
+                (ctx as any).type = 'text/css; charset=utf-8';
+              } else if (ext === '.json') {
+                (ctx as any).type = 'application/json; charset=utf-8';
+              } else if (ext === '.wasm') {
+                (ctx as any).type = 'application/wasm';
+              } else {
+                (ctx as any).type = ext;
+              }
+              ctx.body = await fs.readFile(targetFile);
+              return;
+            }
+          }
+          ctx.status = 404;
+          ctx.body = { error: 'File not found' };
         }
       }
     });

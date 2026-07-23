@@ -22,7 +22,7 @@ export function resolveFileViewerAssetBase(rawBase: string = '', downloaded: boo
   if (isBuildFull || downloaded) {
     const origin = typeof window !== 'undefined' && window.location ? window.location.origin : '';
     const base = origin ? `${origin}/` : getRuntimePublicBase();
-    return new URL('static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/', base).toString();
+    return new URL('api/kkfileviewPublicAssets/file-viewer/', base).toString();
   }
 
   // 默认使用国内极速 npmmirror (阿里 npm 镜像 CDN)，无需梯子即可秒级加载
