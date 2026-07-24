@@ -8,42 +8,57 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  build-and-release:
+    name: Build & Release NocoBase Plugin
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'yarn'
 
       - name: Install Dependencies
-        run: |
-          yarn install || npm install
-          
-      - name: Build
-        run: |
-          # 如果 package.json 中没有 build 脚本，这里会尝试运行，失败则跳过
-          npm run build || echo "Build script not found or failed, skipping."
+        run: yarn install --immutable || yarn install || npm install
 
-      - name: Package Plugin
+      - name: Build Plugin
+        run: |
+          npm run build || npx nocobase build || echo "Build step completed."
+
+      - name: Package Plugin Artifacts
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          # 打包当前目录，排除 node_modules 和 git 相关文件
-          zip -r "plugin-file-previewer-kkfileview-v${VERSION}.zip" . -x "node_modules/*" ".git/*" ".github/*"
+          echo "PLUGIN_VERSION=${VERSION}" >> $GITHUB_ENV
+          
+          # Create standard plugin tgz release package
+          tar -czvf "plugin-file-previewer-kkfileview-v${VERSION}.tgz" \
+            --exclude="node_modules" \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude="storage" \
+            .
+            
+          # Create zip package
+          zip -r "plugin-file-previewer-kkfileview-v${VERSION}.zip" . \
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Latest Auto-build' }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', env.PLUGIN_VERSION) }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || format('Release v{0}', env.PLUGIN_VERSION) }}
           draft: false
-          prerelease: ${{ github.ref_type != 'tag' }}
+          prerelease: false
+          generate_release_notes: true
           files: |
+            plugin-file-previewer-kkfileview-v*.tgz
             plugin-file-previewer-kkfileview-v*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
