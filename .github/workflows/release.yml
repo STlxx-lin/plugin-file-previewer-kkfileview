@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-and-release:
-    name: Build & Release NocoBase Plugin
+    name: Build & Release Dual-Version NocoBase Plugin
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -31,12 +31,15 @@ jobs:
         run: |
           npm run build || npx nocobase build || echo "Build step completed."
 
-      - name: Package Plugin Artifacts
+      - name: Package Light Version (轻量版 - 无内置静态资产)
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "PLUGIN_VERSION=${VERSION}" >> $GITHUB_ENV
           
-          # Create standard plugin tgz release package
+          # 清理本地可能存在的静态资产
+          rm -rf public/file-viewer
+          
+          # 打包轻量版 tgz 与 zip
           tar -czvf "plugin-file-previewer-kkfileview-v${VERSION}.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
@@ -44,9 +47,32 @@ jobs:
             --exclude="storage" \
             .
             
-          # Create zip package
           zip -r "plugin-file-previewer-kkfileview-v${VERSION}.zip" . \
             -x "node_modules/*" ".git/*" ".github/*" "storage/*"
+
+      - name: Package Full Version (完整版 - 内置 File Viewer 离线资产)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          
+          # 提取 node_modules 中的离线静态资产到 public/file-viewer
+          mkdir -p public/file-viewer
+          if [ -d "node_modules/@file-viewer/web-full" ]; then
+            cp -r node_modules/@file-viewer/web-full/* public/file-viewer/ || true
+          fi
+          
+          # 打包完整版 tgz 与 zip
+          tar -czvf "plugin-file-previewer-kkfileview-v${VERSION}-full.tgz" \
+            --exclude="node_modules" \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude="storage" \
+            .
+            
+          zip -r "plugin-file-previewer-kkfileview-v${VERSION}-full.zip" . \
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*"
+
+          # 清理临时 public 静态资产目录
+          rm -rf public/file-viewer
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
