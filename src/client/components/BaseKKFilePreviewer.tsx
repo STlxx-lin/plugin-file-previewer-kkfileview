@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress } from 'antd';
-import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
+import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
@@ -1061,34 +1061,61 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           )}
         </div>
 
-        <div style={{ padding: '10px 16px', borderTop: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <Space size="middle">
+        <div
+          style={{
+            padding: isMobileViewport ? '8px 12px' : '10px 16px',
+            borderTop: '1px solid #f0f0f0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: isMobileViewport ? 6 : 8,
+            maxWidth: '100%',
+            boxSizing: 'border-box',
+          }}
+        >
+          <Space size={isMobileViewport ? 'small' : 'middle'} style={{ flexWrap: 'wrap' }}>
             {enabledModes.length > 1 && (
-              <Radio.Group
-                value={previewMode}
-                onChange={(e) => setPreviewMode(e.target.value as PreviewService)}
-                optionType="button"
-                buttonStyle="solid"
-              >
-                {enabledModes.map((mode) => (
-                  <Radio.Button key={mode} value={mode}>
-                    {mode === 'microsoft' ? '微软在线预览' : mode === 'kkfileview' ? 'kkFileView' : mode === 'basemetas' ? 'BaseMetas' : 'File Viewer'}
-                  </Radio.Button>
-                ))}
-              </Radio.Group>
+              isMobileViewport ? (
+                <Select
+                  size="small"
+                  value={previewMode}
+                  onChange={(val) => setPreviewMode(val as PreviewService)}
+                  options={enabledModes.map((mode) => ({
+                    label: mode === 'microsoft' ? '微软' : mode === 'kkfileview' ? 'kkFile' : mode === 'basemetas' ? 'BaseMetas' : 'FileViewer',
+                    value: mode,
+                  }))}
+                  style={{ minWidth: 100 }}
+                />
+              ) : (
+                <Radio.Group
+                  value={previewMode}
+                  onChange={(e) => setPreviewMode(e.target.value as PreviewService)}
+                  optionType="button"
+                  buttonStyle="solid"
+                >
+                  {enabledModes.map((mode) => (
+                    <Radio.Button key={mode} value={mode}>
+                      {mode === 'microsoft' ? '微软在线预览' : mode === 'kkfileview' ? 'kkFileView' : mode === 'basemetas' ? 'BaseMetas' : 'File Viewer'}
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
+              )
             )}
 
             {hasPagination && (
-              <Space size="middle">
+              <Space size={isMobileViewport ? 4 : 'middle'}>
                 <Button
+                  size={isMobileViewport ? 'small' : 'middle'}
                   icon={<LeftOutlined />}
                   disabled={index! <= 0}
                   onClick={() => onSwitchIndex && onSwitchIndex(index! - 1)}
                 />
-                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                <Typography.Text type="secondary" style={{ fontSize: isMobileViewport ? 12 : 13 }}>
                   {currentDisplayIndex} / {totalDisplayCount}
                 </Typography.Text>
                 <Button
+                  size={isMobileViewport ? 'small' : 'middle'}
                   icon={<RightOutlined />}
                   disabled={index! >= list!.length - 1}
                   onClick={() => onSwitchIndex && onSwitchIndex(index! + 1)}
@@ -1097,33 +1124,82 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             )}
           </Space>
 
-          <Space size="middle">
+          <Space size={isMobileViewport ? 4 : 'middle'} style={{ flexWrap: 'wrap' }}>
             {kkfileviewConfig.enablePrint !== false && (
-              <Button icon={<PrinterOutlined />} onClick={handlePrint} disabled={unsupportedFile || !fileMeta.fullUrl}>
-                {t('Print')}
-              </Button>
+              isMobileViewport ? (
+                <Tooltip title={t('Print')}>
+                  <Button
+                    size="small"
+                    icon={<PrinterOutlined />}
+                    onClick={handlePrint}
+                    disabled={unsupportedFile || !fileMeta.fullUrl}
+                  />
+                </Tooltip>
+              ) : (
+                <Button icon={<PrinterOutlined />} onClick={handlePrint} disabled={unsupportedFile || !fileMeta.fullUrl}>
+                  {t('Print')}
+                </Button>
+              )
             )}
             {kkfileviewConfig.enableOpenInNewWindow !== false && (
-              <Button onClick={handleOpenNewWindow} disabled={unsupportedFile || !resolvedPreviewUrl}>
-                {t('Open in new window')}
-              </Button>
+              isMobileViewport ? (
+                <Tooltip title={t('Open in new window')}>
+                  <Button
+                    size="small"
+                    icon={<ExportOutlined />}
+                    onClick={handleOpenNewWindow}
+                    disabled={unsupportedFile || !resolvedPreviewUrl}
+                  />
+                </Tooltip>
+              ) : (
+                <Button icon={<ExportOutlined />} onClick={handleOpenNewWindow} disabled={unsupportedFile || !resolvedPreviewUrl}>
+                  {t('Open in new window')}
+                </Button>
+              )
             )}
             {canSeeCopyEmbedButton && (
-              <Button onClick={openEmbedConfigModal} disabled={unsupportedFile || !resolvedPreviewUrl}>
-                {t('Copy Embed HTML')}
-              </Button>
+              isMobileViewport ? (
+                <Tooltip title={t('Copy Embed HTML')}>
+                  <Button
+                    size="small"
+                    icon={<CodeOutlined />}
+                    onClick={openEmbedConfigModal}
+                    disabled={unsupportedFile || !resolvedPreviewUrl}
+                  />
+                </Tooltip>
+              ) : (
+                <Button icon={<CodeOutlined />} onClick={openEmbedConfigModal} disabled={unsupportedFile || !resolvedPreviewUrl}>
+                  {t('Copy Embed HTML')}
+                </Button>
+              )
             )}
             {kkfileviewConfig.enableFullscreenButton !== false && (
-              <Button icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
-                {isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}
-              </Button>
+              isMobileViewport ? (
+                <Tooltip title={isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}>
+                  <Button
+                    size="small"
+                    icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                    onClick={handleToggleFullscreen}
+                  />
+                </Tooltip>
+              ) : (
+                <Button icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
+                  {isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}
+                </Button>
+              )
             )}
             {kkfileviewConfig.enableDownload !== false && (
-              <Button type="primary" onClick={handleDownload} disabled={!fileMeta.fullUrl}>
+              <Button
+                type="primary"
+                size={isMobileViewport ? 'small' : 'middle'}
+                icon={<DownloadOutlined />}
+                onClick={handleDownload}
+                disabled={!fileMeta.fullUrl}
+              >
                 {t('Download')}
               </Button>
             )}
-            <Button onClick={handleClose}>
+            <Button size={isMobileViewport ? 'small' : 'middle'} onClick={handleClose}>
               {t('Close')}
             </Button>
           </Space>
