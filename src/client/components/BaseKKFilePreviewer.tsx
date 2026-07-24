@@ -98,6 +98,50 @@ function openPopupWindow(url: string, features: string = '') {
   return popup;
 }
 
+async function fetchAsBlobUrl(url: string, defaultMime: string = 'application/pdf', token?: string): Promise<{ blobUrl: string; revoke: () => void }> {
+  try {
+    const headers: HeadersInit = {};
+    let targetUrl = url;
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      if (!targetUrl.includes('token=')) {
+        const separator = targetUrl.includes('?') ? '&' : '?';
+        targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
+      }
+    }
+    const resp = await fetch(targetUrl, { headers });
+    if (!resp.ok) {
+      throw new Error(`Fetch failed: ${resp.status}`);
+    }
+    const buffer = await resp.arrayBuffer();
+    let mime = defaultMime;
+    const cleanUrl = url.split('?')[0].toLowerCase();
+    if (cleanUrl.endsWith('.pdf')) mime = 'application/pdf';
+    else if (cleanUrl.endsWith('.png')) mime = 'image/png';
+    else if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) mime = 'image/jpeg';
+    else if (cleanUrl.endsWith('.gif')) mime = 'image/gif';
+    else if (cleanUrl.endsWith('.svg')) mime = 'image/svg+xml';
+    else if (cleanUrl.endsWith('.webp')) mime = 'image/webp';
+
+    const blob = new Blob([buffer], { type: mime });
+    const blobUrl = URL.createObjectURL(blob);
+    return {
+      blobUrl,
+      revoke: () => {
+        try {
+          URL.revokeObjectURL(blobUrl);
+        } catch {}
+      },
+    };
+  } catch (err) {
+    console.error('fetchAsBlobUrl error:', err);
+    return {
+      blobUrl: url,
+      revoke: () => {},
+    };
+  }
+}
+
 function printImage(src: string, title: string) {
   const safeTitle = escapeHtml(title);
   const safeSrc = escapeHtml(src);
@@ -736,7 +780,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     };
   }, [showFileViewerLoading]);
 
-  const handlePrint = useCallback(() => {
+  const handlePrint = useCallback(async () => {
     if (!file?.url) return;
     if (unsupportedFile) return;
 
@@ -747,20 +791,37 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         activeIframe.contentWindow.print();
         return;
       } catch {
-        // 同源/跨域限制触发时自动降级至独立打印窗口
+        // 同源/跨域限制触发时自动降级至 Blob URL 打印
       }
     }
 
-    if (fileMeta.isImg) {
-      printImage(fileMeta.fullUrl, fileDisplayTitle || 'Image');
-    } else if (fileMeta.isPdf) {
-      printPdf(fileMeta.fullUrl);
-    } else if (previewMode && resolvedPreviewUrl) {
-      printViaPopup(resolvedPreviewUrl, fileDisplayTitle || 'Document');
-    } else {
-      printViaPopup(fileMeta.fullUrl, fileDisplayTitle || 'Document');
+    const printTargetUrl = (previewMode && resolvedPreviewUrl) ? resolvedPreviewUrl : fileMeta.fullUrl;
+    let blobInfo: { blobUrl: string; revoke: () => void } | null = null;
+    try {
+      const mime = fileMeta.isImg ? 'image/png' : 'application/pdf';
+      blobInfo = await fetchAsBlobUrl(printTargetUrl, mime, api.auth?.token);
+    } catch {
+      blobInfo = { blobUrl: printTargetUrl, revoke: () => {} };
     }
-  }, [file, previewMode, fileMeta, resolvedPreviewUrl, unsupportedFile, fileDisplayTitle]);
+
+    const finalUrl = blobInfo.blobUrl;
+    const cleanup = () => {
+      setTimeout(() => {
+        blobInfo?.revoke();
+      }, 5000);
+    };
+
+    if (fileMeta.isImg) {
+      printImage(finalUrl, fileDisplayTitle || 'Image');
+      cleanup();
+    } else if (fileMeta.isPdf) {
+      printPdf(finalUrl);
+      cleanup();
+    } else {
+      printViaPopup(finalUrl, fileDisplayTitle || 'Document');
+      cleanup();
+    }
+  }, [file, previewMode, fileMeta, resolvedPreviewUrl, unsupportedFile, fileDisplayTitle, api]);
 
   const handleOpenNewWindow = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
