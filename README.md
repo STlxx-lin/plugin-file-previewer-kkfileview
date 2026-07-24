@@ -1,5 +1,9 @@
 # @nocobase/plugin-file-previewer-kkfileview
 
+[![浏览量](https://komarev.com/ghpvc/?username=nocobase-plugin-file-previewer-kkfileview&color=007ec6&style=flat-square&label=%E7%80%8F%E8%A7%8D%E9%87%8F)](https://github.com)
+[![NocoBase Version](https://img.shields.io/badge/NocoBase-2.1.x%20%7C%202.2.x-brightgreen.svg)](https://www.nocobase.com)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 高功能、多引擎的 NocoBase 文件预览插件，深度集成 **kkFileView**、**BaseMetas**、**Microsoft Online** 与本地离线 **File Viewer** 四大预览引擎。为 NocoBase 提供涵盖 Office 文档（Word/Excel/PPT）、PDF、CAD 图纸、3D 模型、音视频及压缩包的全方位在线与离线预览解决方案。
 
 ---
@@ -36,8 +40,8 @@
 
 ![修改记录面板](docs/images/03_settings_modification_records.png)
 
-### 7. 预览调用日志追溯
-提供完整的用户文件预览日志记录，清晰审计预览时间、文件名称、文件 URL 及实际调用的预览服务引擎。
+### 7. 预览调用日志与浏览统计追溯
+提供完整的用户文件预览日志记录与浏览数量统计，清晰审计预览时间、文件名称、文件 URL、实际调用的预览服务引擎以及各文件的累计调阅频次。
 
 ![预览记录面板](docs/images/04_settings_preview_records.png)
 
@@ -55,6 +59,9 @@
   - **BaseMetas**：支持 Office、CAD、OFD 等高性能预览引擎。
   - **Microsoft Online**：公有云极简部署的微软官方在线预览服务。
   - **File Viewer**：纯前端/本地离线预览引擎，完美适应网闸与隔离内网。
+- 📊 **文件预览统计与调用日志追溯**：
+  - 自动记录每次文件调用的预览时间、文件名称、文件 URL、操作用户及实际调用的预览引擎。
+  - 支持文件浏览数量统计与日志追溯审计，方便系统管理员掌控文档调阅热度与合规分析。
 - 🎨 **极致交互与细节优化**：
   - **标准大小按键与响应式控制栏**：底部操作栏使用标准中等尺寸按钮，兼顾移动端与桌面端的轻松点击体验。
   - **全屏沉浸预览与右上角悬浮缩小**：进入全屏模式后，右上角智能呈现悬浮“退出全屏/缩小”按钮，提供极佳的快捷操作体验。
