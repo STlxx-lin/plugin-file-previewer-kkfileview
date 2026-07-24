@@ -345,6 +345,10 @@ const validateServerUrl = (value?: string): boolean => {
 export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) => {
     const api = adapters.useAPIClient();
     const t = adapters.useT();
+    const tr = (key: string, fallback: string) => {
+        const res = t(key);
+        return !res || res === key ? fallback : res;
+    };
     const [form] = Form.useForm();
     const [loading, setLoading] = useState(true);
     const [settingsRecords, setSettingsRecords] = useState<KkfileviewSettingsRecord[]>([]);
@@ -617,9 +621,9 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 skipNotify: true,
             });
             removeLocal(key);
-            message.success(t('Deleted successfully'));
+            message.success(tr('Deleted successfully', '删除记录成功'));
         } catch {
-            message.error(t('Delete failed'));
+            message.error(tr('Delete failed', '删除记录失败'));
         } finally {
             setDeletingKey(null);
         }
@@ -638,9 +642,9 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 skipNotify: true,
             });
             clearLocal();
-            message.success(t('Cleared successfully'));
+            message.success(tr('Cleared successfully', '清空记录成功'));
         } catch {
-            message.error(t('Clear failed'));
+            message.error(tr('Clear failed', '清空记录失败'));
         } finally {
             setClearing(false);
         }
@@ -827,7 +831,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             };
             const hostValue = String(values[hostFieldMap[serviceKey]] || '').trim();
             if (!hostValue) {
-                message.warning(t('Please fill in service address first'));
+                message.warning(tr('Please fill in service address first', '请先填写服务地址'));
                 return;
             }
             setTestingServices((prev) => ({ ...prev, [serviceKey]: true }));
@@ -843,14 +847,14 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             const payload = getServiceHealthPayload(response);
             if (payload.reachable || payload.success) {
                 const modeText = payload.mode ? ` (${payload.mode})` : '';
-                message.success(`${t('Service connectivity normal')}${modeText}`);
+                message.success(`${tr('Service connectivity normal', '服务连通正常')}${modeText}`);
             } else {
-                message.error(payload.message || t('Service unreachable or abnormal response'));
+                message.error(payload.message || tr('Service unreachable or abnormal response', '服务无法访问或响应异常'));
             }
         } catch (error: unknown) {
             if (hasErrorFields(error)) return;
             console.error(error);
-            message.error(t('Service connectivity test failed'));
+            message.error(tr('Service connectivity test failed', '服务连通性测试失败'));
         } finally {
             setTestingServices((prev) => ({ ...prev, [serviceKey]: false }));
         }
@@ -897,7 +901,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             enableFileViewer: false,
             preferredPreview: 'microsoft',
         });
-        message.info(t('Reset to default values, please click save to submit'));
+        message.info(tr('Reset to default values, please click save to submit', '已恢复默认值，请点击保存提交生效'));
     };
 
     const handleWizardFinish = async () => {
@@ -1018,11 +1022,11 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             }).catch(() => {
             });
 
-            message.success(t('Configuration saved successfully'));
+            message.success(tr('Configuration saved successfully', '配置保存成功'));
         } catch (error: unknown) {
             if (hasErrorFields(error)) return;
             console.error(error);
-            message.error(t('Failed to save configuration'));
+            message.error(tr('Failed to save configuration', '保存配置失败'));
             throw error;
         }
     };
