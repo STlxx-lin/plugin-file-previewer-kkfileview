@@ -74,6 +74,7 @@ const CHANGE_FIELD_LABEL_MAP: Record<string, string> = {
   enableFullscreenButton: '全屏按钮',
   enableMobileAutoFullscreen: '移动端自动全屏',
   enableDownload: '下载按钮',
+  enableFileViewerCdnToggle: 'File Viewer CDN 切换按钮',
   enableKkfileview: '启用 kkFileView',
   enableBasemetas: '启用 BaseMetas',
   enableMicrosoft: '启用微软在线',
@@ -753,6 +754,23 @@ export const BasicSettingsCard = ({
             </div>
             <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 6, fontSize: 12 }}>
               {t('Show download button in preview dialog (enabled by default)')}
+            </Typography.Paragraph>
+          </div>
+        </Col>
+        <Col xs={24} md={12}>
+          <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <Typography.Text strong>{t('Enable File Viewer CDN Toggle Button')}</Typography.Text>
+              <Form.Item
+                name="enableFileViewerCdnToggle"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch />
+              </Form.Item>
+            </div>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 6, fontSize: 12 }}>
+              {t('Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)')}
             </Typography.Paragraph>
           </div>
         </Col>

@@ -1121,7 +1121,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                 </Button>
               )
             )}
-            {(previewMode as string) === 'fileViewer' && (
+            {(previewMode as string) === 'fileViewer' && kkfileviewConfig.enableFileViewerCdnToggle !== false && (
               isMobileViewport ? (
                 <Tooltip title={fileViewerCdnMode ? t('CDN Mode (direct link)') : t('Proxy Mode (authenticated)')}>
                   <Button

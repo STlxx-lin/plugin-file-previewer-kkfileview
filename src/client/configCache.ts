@@ -47,6 +47,7 @@ export type KkfileviewConfigRecord = Partial<{
     enableFullscreenButton: boolean;
     enableMobileAutoFullscreen: boolean;
     enableDownload: boolean;
+    enableFileViewerCdnToggle: boolean;
     basemetasRequestType: BasemetasRequestType | string;
     watermarkType: string;
     watermark: string;
@@ -113,6 +114,7 @@ interface KkfileviewConfig {
     enableFullscreenButton: boolean;
     enableMobileAutoFullscreen: boolean;
     enableDownload: boolean;
+    enableFileViewerCdnToggle: boolean;
     basemetasRequestType: BasemetasRequestType;
     watermarkType: string;
     watermark: string;
@@ -142,6 +144,7 @@ export const kkfileviewConfig: KkfileviewConfig = {
     enableFullscreenButton: true,
     enableMobileAutoFullscreen: false,
     enableDownload: true,
+    enableFileViewerCdnToggle: true,
     basemetasRequestType: 'query',
     watermarkType: 'preview',
     watermark: '',
@@ -221,6 +224,7 @@ export function updateConfigCache(record?: KkfileviewConfigRecord | null) {
     kkfileviewConfig.enableFullscreenButton = record.enableFullscreenButton ?? true;
     kkfileviewConfig.enableMobileAutoFullscreen = record.enableMobileAutoFullscreen === true;
     kkfileviewConfig.enableDownload = record.enableDownload ?? true;
+    kkfileviewConfig.enableFileViewerCdnToggle = record.enableFileViewerCdnToggle ?? true;
     kkfileviewConfig.basemetasRequestType = record.basemetasRequestType === 'base64' ? 'base64' : 'query';
     kkfileviewConfig.watermarkType = record.watermarkType || 'preview';
     kkfileviewConfig.watermark = record.watermark || '';
