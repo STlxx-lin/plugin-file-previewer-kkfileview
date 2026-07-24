@@ -977,8 +977,13 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 const response = await api.request({
                     url: 'kkfileviewSettings:update',
                     method: 'post',
+                    params: {
+                        filterByTk: currentRecord.id,
+                        filter: { id: currentRecord.id },
+                    },
                     data: {
                         filterByTk: currentRecord.id,
+                        filter: { id: currentRecord.id },
                         ...payload,
                     },
                 });

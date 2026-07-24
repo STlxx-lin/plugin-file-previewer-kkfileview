@@ -304,10 +304,29 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       await next();
     };
 
+    const patchSettingsUpdate = async (ctx: any, next: () => Promise<any>) => {
+      if (ctx.path && ctx.path.includes('kkfileviewSettings:update')) {
+        const body = ctx.request?.body || {};
+        ctx.action = ctx.action || {};
+        ctx.action.params = ctx.action.params || {};
+        const targetId = body.filterByTk || body.id || (body.filter && body.filter.id);
+        if (targetId) {
+          if (!ctx.action.params.filterByTk) {
+            ctx.action.params.filterByTk = targetId;
+          }
+          if (!ctx.action.params.filter) {
+            ctx.action.params.filter = { id: targetId };
+          }
+        }
+      }
+      await next();
+    };
+
     if (Array.isArray((this.app as any).middleware)) {
-      (this.app as any).middleware.unshift(servePublicFile);
+      (this.app as any).middleware.unshift(servePublicFile, patchSettingsUpdate);
     } else {
       this.app.use(servePublicFile);
+      this.app.use(patchSettingsUpdate);
     }
 
     await this.db.import({
