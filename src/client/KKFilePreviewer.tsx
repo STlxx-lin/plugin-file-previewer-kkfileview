@@ -689,7 +689,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
       setFileViewerProgress(0); // 重置进度动画状态。
       return; // 跳过 iframe 专属超时逻辑。
     } // 结束 fileViewer 专属加载态分支。
-    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && previewMode !== 'fileViewer'; // 计算当前是否需要进入 iframe 加载监控逻辑。
+    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && (previewMode as string) !== 'fileViewer'; // 计算当前是否需要进入 iframe 加载监控逻辑。
     if (!shouldWatchIframe) {
       iframeLoadedRef.current = false;
       setIframeLoadFailed(false);
@@ -707,8 +707,8 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     }, 60000);
     return () => window.clearTimeout(timer);
   }, [resolvedPreviewUrl, previewMode, file?.url, unsupportedFile, fileMeta.isImg, iframeRetrySeed]);
-  const showIframeLoading = previewMode !== 'fileViewer' && iframeLoading && !iframeLoadFailed;
-  const showFileViewerLoading = previewMode === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
+  const showIframeLoading = (previewMode as string) !== 'fileViewer' && iframeLoading && !iframeLoadFailed;
+  const showFileViewerLoading = (previewMode as string) === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
 
   // 模拟进度动画：showFileViewerLoading 为 true 时启动缓慢递增定时器（0→90%），onReady 后跳到 100%。
   // 由于 mountViewer 内部异步加载渲染引擎无进度回调，此动画是给用户提供视觉反馈的唯一可行方案。

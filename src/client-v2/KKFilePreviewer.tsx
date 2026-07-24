@@ -480,10 +480,21 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
       method: 'get',
       params: { url: fileMeta.fullUrl },
       skipNotify: true,
-    }).then((res) => {
+    }).then((res: any) => {
       if (isMounted) {
-        const directUrl = res?.data?.data?.directUrl;
-        if (directUrl && /^https?:\/\//i.test(directUrl)) {
+        const findDirectUrl = (obj: any): string => {
+          if (!obj || typeof obj !== 'object') return '';
+          if (typeof obj.directUrl === 'string' && /^https?:\/\//i.test(obj.directUrl)) return obj.directUrl;
+          for (const key of Object.keys(obj)) {
+            if (obj[key] && typeof obj[key] === 'object') {
+              const found = findDirectUrl(obj[key]);
+              if (found) return found;
+            }
+          }
+          return '';
+        };
+        const directUrl = findDirectUrl(res);
+        if (directUrl) {
           setResolvedDirectFileUrl(directUrl);
         } else {
           setResolvedDirectFileUrl(rawTarget);
@@ -516,7 +527,14 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         }
         if (service.key === 'kkfileview') {
           const baseUrl = `${serviceConfigMap.kkfileview.host.replace(/\/$/, '')}/onlinePreview`;
-          const targetUrl = activeTargetFileUrl;
+          let targetUrl = activeTargetFileUrl;
+          try {
+            if (decodeURIComponent(targetUrl) !== targetUrl) {
+              targetUrl = decodeURI(targetUrl);
+            }
+          } catch {
+            // ignore
+          }
           const encodedUrl = encodeURIComponent(Base64.encode(targetUrl));
           let previewUrl = `${baseUrl}?url=${encodedUrl}`;
           if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
@@ -527,7 +545,14 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         }
         if (service.key === 'basemetas') {
           const baseUrl = `${serviceConfigMap.basemetas.host.replace(/\/$/, '')}/preview/view`;
-          const targetUrl = activeTargetFileUrl;
+          let targetUrl = activeTargetFileUrl;
+          try {
+            if (decodeURIComponent(targetUrl) !== targetUrl) {
+              targetUrl = decodeURI(targetUrl);
+            }
+          } catch {
+            // ignore
+          }
           const url = encodeURIComponent(targetUrl);
           const inferredExt = fileMeta.ext ? `.${fileMeta.ext}` : '';
           const ensureExt = (name: string) => {
@@ -548,10 +573,10 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
           const fileName = encodeURIComponent(normalizedFileName);
           const displayName = encodeURIComponent(normalizedDisplayName);
           let previewUrl = '';
-          const useBase64Mode = kkfileviewConfig.basemetasRequestType === 'base64' || fileMeta.fullUrl.includes('?');
+          const useBase64Mode = true;
           if (useBase64Mode) {
             const encodedData = encodeURIComponent(Base64.encode(JSON.stringify({
-              url: fileMeta.fullUrl,
+              url: targetUrl,
               fileName: normalizedFileName,
               displayName: normalizedDisplayName,
               ext: fileMeta.ext,
@@ -646,7 +671,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   }, [isOpen, fileMeta.fullUrl, resolvedPreviewUrl, previewMode, fileDisplayTitle, file?.name, api]);
 
   useEffect(() => {
-    if (previewMode === 'fileViewer') { // 当当前模式为 fileViewer 时改由原生渲染器回调管理加载态。
+    if ((previewMode as string) === 'fileViewer') { // 当当前模式为 fileViewer 时改由原生渲染器回调管理加载态。
       if (unsupportedFile || !resolvedPreviewUrl) { // 当文件不可预览或文件地址为空时重置加载状态。
         iframeLoadedRef.current = false; // 重置已加载标记。
         setIframeLoadFailed(false); // 清空加载失败状态。
@@ -660,7 +685,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
       setFileViewerProgress(0); // 重置下载进度状态.
       return; // 跳过 iframe 专属超时逻辑。
     } // 结束 fileViewer 专属加载态分支。
-    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && Boolean(resolvedPreviewUrl); // 计算当前是否需要进入 iframe 加载监控逻辑。
+    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && Boolean(resolvedPreviewUrl) && (previewMode as string) !== 'fileViewer'; // 计算当前是否需要进入 iframe 加载监控逻辑。
     if (!shouldWatchIframe) {
       iframeLoadedRef.current = false;
       setIframeLoadFailed(false);
@@ -679,7 +704,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     return () => window.clearTimeout(timer);
   }, [resolvedPreviewUrl, previewMode, file?.url, unsupportedFile, fileMeta.isImg, iframeRetrySeed]);
   const showKkfileviewLoading = previewMode === 'kkfileview' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl;
-  const showFileViewerLoading = previewMode === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
+  const showFileViewerLoading = (previewMode as string) === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
 
   // 模拟进度动画：showFileViewerLoading 为 true 时启动缓慢递增定时器（0→90%），onReady 后跳到 100%。
   // 由于 mountViewer 内部异步加载渲染引擎无进度回调，此动画是给用户提供视觉反馈的唯一可行方案。
