@@ -1222,22 +1222,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           </Space>
 
           <Space size={isMobileViewport ? 4 : 'middle'} style={{ flexWrap: 'wrap' }}>
-            {kkfileviewConfig.enablePrint !== false && (
-              isMobileViewport ? (
-                <Tooltip title={t('Print')}>
-                  <Button
-                    size="small"
-                    icon={<PrinterOutlined />}
-                    onClick={handlePrint}
-                    disabled={unsupportedFile || !fileMeta.fullUrl}
-                  />
-                </Tooltip>
-              ) : (
-                <Button icon={<PrinterOutlined />} onClick={handlePrint} disabled={unsupportedFile || !fileMeta.fullUrl}>
-                  {t('Print')}
-                </Button>
-              )
-            )}
+
             {kkfileviewConfig.enableOpenInNewWindow !== false && (
               isMobileViewport ? (
                 <Tooltip title={t('Open in new window')}>
