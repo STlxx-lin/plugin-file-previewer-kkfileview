@@ -44,16 +44,16 @@ jobs:
           # 清理本地可能存在的静态资产
           rm -rf public/file-viewer
           
-          # 打包轻量版 tgz 与 zip（输出至外部 /tmp/release-artifacts 避免文件变化冲突）
+          # 打包轻量版 tgz 与 zip（使用 * 保持单层根目录平铺，与 zip 结构完全一致）
           tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             --exclude="docs" \
-            .
+            *
             
-          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.zip" . \
+          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.zip" * \
             -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*"
 
       - name: Package Full Version (完整版 - 内置 File Viewer 离线资产)
@@ -64,16 +64,16 @@ jobs:
             cp -r node_modules/@file-viewer/web-full/* public/file-viewer/ || true
           fi
           
-          # 打包完整版 tgz 与 zip（输出至外部 /tmp/release-artifacts）
+          # 打包完整版 tgz 与 zip（使用 * 保持单层根目录平铺）
           tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             --exclude="docs" \
-            .
+            *
             
-          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.zip" . \
+          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.zip" * \
             -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*"
 
           # 清理临时 public 静态资产目录
