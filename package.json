@@ -7,7 +7,7 @@
   "description.zh-CN": "集成 kkFileView 与 BaseMetas Fileview 服务，支持 Office、PDF、压缩包等多种文件格式在线预览。反馈QQ：1414794992",
   "homepage": "http://192.168.0.54",
   "homepage.zh-CN": "http://192.168.0.54",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "main": "dist/server/index.js",
   "client": "dist/client/index.js",
   "nocobase": {
