@@ -1,3 +1,4 @@
+import { buildStorageBaseUrl } from '../client/previewUtils';
 import { Plugin } from '@nocobase/server';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -163,7 +164,16 @@ function formatProgressBytes(bytes: number): string {
 }
 
 function getActionValues(ctx: ActionContext): Record<string, unknown> {
-  return ctx?.action?.params?.values || ctx?.request?.body || {};
+  const actionParams = ctx?.action?.params || {};
+  const requestBody = ctx?.request?.body || {};
+  const requestQuery = (ctx as any)?.request?.query || (ctx as any)?.query || {};
+
+  return {
+    ...requestQuery,
+    ...actionParams,
+    ...(actionParams.values || {}),
+    ...requestBody,
+  };
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -780,10 +790,120 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     await this.ensureDefaultRecord();
   }
 
+  private async resolveNocoBasePermanentFileUrl(ctx: any, fileUrl: string): Promise<string> {
+    const urlString = String(fileUrl || '').trim();
+    if (!urlString) return urlString;
+    
+    // 1. 匹配 NocoBase 永久地址格式: /files/{app}/{dataSource}/{table}/{id}.{ext}
+    const match = urlString.match(/\/files\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(\d+)(?:\.([a-z0-9]+))?/i);
+    if (match && ctx?.db) {
+      const [, appName, dataSourceKey, tableName, fileId] = match;
+      
+      // 方案 A: 使用 Sequelize 原生 SQL 联查（100% 准确提取数据库中存好的 baseUrl 与 filename）
+      try {
+        if (ctx.db.sequelize && typeof ctx.db.sequelize.query === 'function') {
+          const sql = `SELECT a.filename, a.name, a.path, a.url, s.baseUrl, s.baseurl, s.options
+                       FROM ${tableName} a 
+                       LEFT JOIN storages s ON (a.storageId = s.id OR a.storage_id = s.id)
+                       WHERE a.id = :id LIMIT 1`;
+          const [results] = await ctx.db.sequelize.query(sql, {
+            replacements: { id: fileId },
+            type: ctx.db.sequelize.QueryTypes?.SELECT || 'SELECT',
+          });
+          const row = Array.isArray(results) ? results[0] : results;
+          if (row) {
+            const filename = row.filename || row.name || row.path || row.url;
+            let baseUrl = row.baseUrl || row.baseurl;
+            if (!baseUrl && row.options) {
+              try {
+                const opts = typeof row.options === 'string' ? JSON.parse(row.options) : row.options;
+                baseUrl = opts?.baseUrl || opts?.baseurl || opts?.endpoint;
+              } catch {
+                // ignore
+              }
+            }
+            if (baseUrl && /^https?:\/\//i.test(baseUrl) && filename) {
+              const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+              const cleanFilename = String(filename).replace(/^\/+/, '');
+              let encodedName = cleanFilename;
+              try {
+                if (decodeURIComponent(cleanFilename) === cleanFilename) {
+                  encodedName = encodeURIComponent(cleanFilename);
+                }
+              } catch {
+                encodedName = encodeURIComponent(cleanFilename);
+              }
+              return `${cleanBase}${encodedName}`;
+            }
+          }
+        }
+      } catch {
+        // fallback to repository query
+      }
+
+      // 方案 B: 使用 NocoBase Repository 联查
+      try {
+        if (typeof ctx.db.getRepository === 'function') {
+          const repo = ctx.db.getRepository(tableName);
+          if (repo) {
+            const fileRecord = await repo.findOne({
+              filter: { id: fileId },
+              appends: ['storage', 'fileStorage', 'storages'],
+            });
+            if (fileRecord) {
+              const rawFile = typeof fileRecord.toJSON === 'function' ? fileRecord.toJSON() : fileRecord;
+              const filename = rawFile.filename || rawFile.name || rawFile.path || rawFile.url;
+              const storage = rawFile.storage || rawFile.fileStorage || rawFile.storages;
+              const storageId = rawFile.storageId || rawFile.storage_id;
+
+              let baseUrl = storage?.baseUrl || storage?.baseurl || storage?.options?.baseUrl;
+
+              if (!baseUrl && storageId) {
+                for (const tableCandidate of ['storages', 'file_storages', 'fileStorages', 'attachments_storages']) {
+                  try {
+                    const storageRepo = ctx.db.getRepository(tableCandidate);
+                    if (storageRepo) {
+                      const storageRecord = await storageRepo.findOne({ filter: { id: storageId } });
+                      if (storageRecord) {
+                        const rawStorage = typeof storageRecord.toJSON === 'function' ? storageRecord.toJSON() : storageRecord;
+                        baseUrl = rawStorage.baseUrl || rawStorage.baseurl || rawStorage.options?.baseUrl || rawStorage.options?.host;
+                        if (baseUrl) break;
+                      }
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }
+              }
+
+              if (baseUrl && /^https?:\/\//i.test(baseUrl) && filename) {
+                const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+                const cleanFilename = String(filename).replace(/^\/+/, '');
+                let encodedName = cleanFilename;
+                try {
+                  if (decodeURIComponent(cleanFilename) === cleanFilename) {
+                    encodedName = encodeURIComponent(cleanFilename);
+                  }
+                } catch {
+                  encodedName = encodeURIComponent(cleanFilename);
+                }
+                return `${cleanBase}${encodedName}`;
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return urlString;
+  }
+
   private registerPreviewResource() {
     if (this.app.resourceManager.isDefined('kkfileviewPreview')) {
       return;
     }
+    const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -813,8 +933,15 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
 
             // 获取 kkFileView 服务地址
             const host = settings.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST;
+            let targetFileUrl = await resolvePermanentUrl(ctx, fileUrl);
+            const token = (ctx as any)?.auth?.token || (ctx as any)?.state?.token;
+            if (token && (targetFileUrl.includes('/files/') || targetFileUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(targetFileUrl)) && !targetFileUrl.includes('token=')) {
+              const separator = targetFileUrl.includes('?') ? '&' : '?';
+              targetFileUrl = `${targetFileUrl}${separator}token=${encodeURIComponent(token)}`;
+            }
+
             // 将文件地址进行 Base64 编码
-            const encodedUrl = Buffer.from(fileUrl).toString('base64');
+            const encodedUrl = Buffer.from(targetFileUrl).toString('base64');
             // 拼接基础预览地址
             let previewUrl = `${host.replace(/\/$/, '')}/onlinePreview?url=${encodeURIComponent(encodedUrl)}`;
 
@@ -844,6 +971,27 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
               },
             };
           }
+        },
+        async resolveDirectUrl(ctx: ActionContext) {
+          const values = getActionValues(ctx);
+          const fileUrl = String(values.url || '').trim();
+          if (!fileUrl) {
+            ctx.status = 400;
+            ctx.body = { data: { message: 'url-required' } };
+            return;
+          }
+          let directUrl = await resolvePermanentUrl(ctx, fileUrl);
+          const token = (ctx as any)?.auth?.token || (ctx as any)?.state?.token;
+          if (token && (directUrl.includes('/files/') || directUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(directUrl)) && !directUrl.includes('token=')) {
+            const separator = directUrl.includes('?') ? '&' : '?';
+            directUrl = `${directUrl}${separator}token=${encodeURIComponent(token)}`;
+          }
+          ctx.body = {
+            data: {
+              directUrl,
+              originalUrl: fileUrl,
+            },
+          };
         },
       },
     });
@@ -1380,6 +1528,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   private registerFileViewerDownloadResource() {
+    if (this.app.resourceManager.isDefined('kkfileviewFileViewerDownload')) {
+      return;
+    }
     this.app.resourceManager.define({
       name: 'kkfileviewFileViewerDownload',
       actions: {

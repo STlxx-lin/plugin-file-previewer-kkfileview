@@ -2,8 +2,40 @@ import type { PreviewService } from './configCache';
 
 export type PreviewMode = PreviewService;
 
+export function buildStorageBaseUrl(storage: any): string {
+  if (!storage) return '';
+  const options = storage.options || storage || {};
+  let baseUrl = storage.baseUrl || storage.baseurl || options.baseUrl || options.baseurl || options.publicUrl || options.host || '';
+  if (!baseUrl && options.endpoint && options.bucket) {
+    let ep = String(options.endpoint).trim();
+    if (!/^https?:\/\//i.test(ep)) {
+      const ssl = options.useSSL || options.ssl || options.secure;
+      ep = `${ssl ? 'https' : 'http'}://${ep}`;
+    }
+    ep = ep.replace(/\/+$/, '');
+    const bucket = String(options.bucket).trim().replace(/^\/+|\/+$/g, '');
+    baseUrl = `${ep}/${bucket}`;
+  } else if (!baseUrl && options.endpoint) {
+    let ep = String(options.endpoint).trim();
+    if (!/^https?:\/\//i.test(ep)) {
+      ep = `http://${ep}`;
+    }
+    baseUrl = ep;
+  }
+  if (baseUrl && !/^https?:\/\//i.test(baseUrl)) {
+    baseUrl = `http://${baseUrl}`;
+  }
+  return baseUrl ? baseUrl.replace(/\/+$/, '') : '';
+}
+
 export function normalizeExtensions(items: string[] = []) {
-  return Array.from(new Set(items.map((item) => String(item).trim().toLowerCase()).filter(Boolean)));
+  return Array.from(
+    new Set(
+      items
+        .map((item) => String(item).trim().toLowerCase())
+        .filter((item) => Boolean(item) && /^[a-z0-9]+$/i.test(item))
+    )
+  );
 }
 
 export function parseExtensions(raw: any, fallback: string[]) {
@@ -64,6 +96,17 @@ export function getFileExt(url: string = '', extname: string = '') {
   return matched ? matched[1].toLowerCase() : '';
 }
 
+export function attachTokenToNocoFileUrl(url: string = '', token?: string | null): string {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl || !token) return rawUrl;
+  const isNocoFileUrl = rawUrl.includes('/files/') || rawUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(rawUrl);
+  if (isNocoFileUrl && !rawUrl.includes('token=')) {
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    return `${rawUrl}${separator}token=${encodeURIComponent(token)}`;
+  }
+  return rawUrl;
+}
+
 export function decidePreviewMode(params: {
   preferredPreview: PreviewMode;
   enabledModes: PreviewMode[];
@@ -73,3 +116,4 @@ export function decidePreviewMode(params: {
   if (enabledAndSupportedModes.includes(preferredPreview)) return preferredPreview;
   return enabledAndSupportedModes[0] || enabledModes[0] || null;
 }
+

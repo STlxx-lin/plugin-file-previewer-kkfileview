@@ -6,7 +6,7 @@ import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { useT } from './locale';
 import { FileViewerRenderer, FileViewerFetchFileFn } from '../client/FileViewerRenderer';
-import { decidePreviewMode, getFileExt, parseExtensions } from '../client/previewUtils';
+import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, parseExtensions } from '../client/previewUtils';
 import {
   EmbedCodePermission,
   PREVIEW_SERVICE_REGISTRY,
@@ -396,12 +396,32 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   const requestedAtRef = useRef<Date>(new Date());
 
   const fileMeta = useMemo(() => {
-    const fullUrl = file?.url ? resolveFileUrl(file.url, kkfileviewConfig.nocobaseHost) : '';
-    const isImg = isImageFile(file?.url || '');
-    const isPdf = isPdfFile(file?.url || '', file?.extname || '');
-    const ext = getFileExt(file?.url || '', file?.extname || '');
+    let fullUrl = '';
+    const rawStorage = (file as any)?.storage || (file as any)?.fileStorage;
+    const storageBaseUrl = buildStorageBaseUrl(rawStorage);
+    const rawFileName = (file as any)?.filename || (file as any)?.name || (file as any)?.path;
+
+    if (storageBaseUrl && /^https?:\/\//i.test(storageBaseUrl) && rawFileName) {
+      const cleanBase = storageBaseUrl.endsWith('/') ? storageBaseUrl : `${storageBaseUrl}/`;
+      const cleanFilename = String(rawFileName).replace(/^\/+/, '');
+      let encodedName = cleanFilename;
+      try {
+        if (decodeURIComponent(cleanFilename) === cleanFilename) {
+          encodedName = encodeURIComponent(cleanFilename);
+        }
+      } catch {
+        encodedName = encodeURIComponent(cleanFilename);
+      }
+      fullUrl = `${cleanBase}${encodedName}`;
+    } else {
+      fullUrl = file?.url ? resolveFileUrl(file.url, kkfileviewConfig.nocobaseHost) : '';
+    }
+
+    const isImg = isImageFile(file?.url || fullUrl);
+    const isPdf = isPdfFile(file?.url || fullUrl, file?.extname || '');
+    const ext = getFileExt(file?.url || fullUrl, file?.extname || '');
     return { fullUrl, isImg, isPdf, ext };
-  }, [file?.url, file?.extname, kkfileviewConfig.nocobaseHost]);
+  }, [file, kkfileviewConfig.nocobaseHost]);
 
   // 生成传递给 fileViewer 的文件名。如果展示标题中缺少文件真实扩展名，则自动补齐，以便库正确识别文件类型。
   const viewerFileName = useMemo(() => {
@@ -442,16 +462,62 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     setPreviewMode(next);
   }, [configReady, preferredPreview, enabledModes, enabledAndSupportedModes, fileMeta.isImg, fileMeta.isPdf, file?.url]);
 
+  const [resolvedDirectFileUrl, setResolvedDirectFileUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!isOpen || !fileMeta.fullUrl) {
+      setResolvedDirectFileUrl('');
+      return;
+    }
+    const rawTarget = attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
+    if (!rawTarget.includes('/files/')) {
+      setResolvedDirectFileUrl(rawTarget);
+      return;
+    }
+    let isMounted = true;
+    api.request({
+      url: 'kkfileviewPreview:resolveDirectUrl',
+      method: 'get',
+      params: { url: fileMeta.fullUrl },
+      skipNotify: true,
+    }).then((res) => {
+      if (isMounted) {
+        const directUrl = res?.data?.data?.directUrl;
+        if (directUrl && /^https?:\/\//i.test(directUrl)) {
+          setResolvedDirectFileUrl(directUrl);
+        } else {
+          setResolvedDirectFileUrl(rawTarget);
+        }
+      }
+    }).catch(() => {
+      if (isMounted) setResolvedDirectFileUrl(rawTarget);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, fileMeta.fullUrl, api.auth.token, api]);
+
+  const activeTargetFileUrl = useMemo(() => {
+    if (resolvedDirectFileUrl) {
+      return resolvedDirectFileUrl;
+    }
+    if (fileMeta.fullUrl.includes('/files/')) {
+      return '';
+    }
+    return attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
+  }, [resolvedDirectFileUrl, fileMeta.fullUrl, api.auth.token]);
+
   const previewUrlMap = useMemo(
     () =>
       PREVIEW_SERVICE_REGISTRY.reduce((acc, service) => {
-        if (!fileMeta.fullUrl) {
+        if (!fileMeta.fullUrl || !activeTargetFileUrl) {
           acc[service.key] = '';
           return acc;
         }
         if (service.key === 'kkfileview') {
           const baseUrl = `${serviceConfigMap.kkfileview.host.replace(/\/$/, '')}/onlinePreview`;
-          const encodedUrl = encodeURIComponent(btoa(unescape(encodeURIComponent(fileMeta.fullUrl))));
+          const targetUrl = activeTargetFileUrl;
+          const encodedUrl = encodeURIComponent(Base64.encode(targetUrl));
           let previewUrl = `${baseUrl}?url=${encodedUrl}`;
           if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
             previewUrl += `&watermarkTxt=${encodeURIComponent(watermarkText)}`;
@@ -461,28 +527,39 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         }
         if (service.key === 'basemetas') {
           const baseUrl = `${serviceConfigMap.basemetas.host.replace(/\/$/, '')}/preview/view`;
-          const url = encodeURIComponent(fileMeta.fullUrl);
+          const targetUrl = activeTargetFileUrl;
+          const url = encodeURIComponent(targetUrl);
           const inferredExt = fileMeta.ext ? `.${fileMeta.ext}` : '';
           const ensureExt = (name: string) => {
             if (!inferredExt) return name;
             return name.toLowerCase().endsWith(inferredExt.toLowerCase()) ? name : `${name}${inferredExt}`;
           };
-          const rawFileName = file?.name || fileDisplayTitle || 'file';
+          const safeDecode = (str: string) => {
+            try {
+              return decodeURIComponent(str);
+            } catch {
+              return str;
+            }
+          };
+          const rawFileName = safeDecode(file?.name || fileDisplayTitle || 'file');
           const normalizedFileName = ensureExt(rawFileName);
-          const rawDisplayName = file?.title || fileDisplayTitle || normalizedFileName;
+          const rawDisplayName = safeDecode(file?.title || fileDisplayTitle || normalizedFileName);
           const normalizedDisplayName = ensureExt(rawDisplayName);
           const fileName = encodeURIComponent(normalizedFileName);
           const displayName = encodeURIComponent(normalizedDisplayName);
           let previewUrl = '';
-          if (kkfileviewConfig.basemetasRequestType === 'base64') {
+          const useBase64Mode = kkfileviewConfig.basemetasRequestType === 'base64' || fileMeta.fullUrl.includes('?');
+          if (useBase64Mode) {
             const encodedData = encodeURIComponent(Base64.encode(JSON.stringify({
               url: fileMeta.fullUrl,
               fileName: normalizedFileName,
               displayName: normalizedDisplayName,
+              ext: fileMeta.ext,
             })));
             previewUrl = `${baseUrl}?data=${encodedData}`;
           } else {
-            previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}`;
+            const extParam = fileMeta.ext ? `&ext=${encodeURIComponent(fileMeta.ext)}&fileType=${encodeURIComponent(fileMeta.ext)}` : '';
+            previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}${extParam}`;
           }
           if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
             previewUrl += `&watermark=${encodeURIComponent(watermarkText)}`;

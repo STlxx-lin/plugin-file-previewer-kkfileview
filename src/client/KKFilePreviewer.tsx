@@ -9,7 +9,7 @@ import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, Fullscreen
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { useT } from './locale';
-import { decidePreviewMode, getFileExt, parseExtensions } from './previewUtils';
+import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, parseExtensions } from './previewUtils';
 import { FileViewerRenderer, FileViewerFetchFileFn } from './FileViewerRenderer';
 import {
   EmbedCodePermission,
@@ -400,12 +400,32 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
   const requestedAtRef = useRef<Date>(new Date());
 
   const fileMeta = useMemo(() => {
-    const fullUrl = file?.url ? resolveFileUrl(file.url, kkfileviewConfig.nocobaseHost) : '';
-    const isImg = isImageFile(file?.url || '');
-    const isPdf = isPdfFile(file?.url || '', file?.extname || '');
-    const ext = getFileExt(file?.url || '', file?.extname || '');
+    let fullUrl = '';
+    const rawStorage = (file as any)?.storage || (file as any)?.fileStorage;
+    const storageBaseUrl = buildStorageBaseUrl(rawStorage);
+    const rawFileName = (file as any)?.filename || (file as any)?.name || (file as any)?.path;
+
+    if (storageBaseUrl && /^https?:\/\//i.test(storageBaseUrl) && rawFileName) {
+      const cleanBase = storageBaseUrl.endsWith('/') ? storageBaseUrl : `${storageBaseUrl}/`;
+      const cleanFilename = String(rawFileName).replace(/^\/+/, '');
+      let encodedName = cleanFilename;
+      try {
+        if (decodeURIComponent(cleanFilename) === cleanFilename) {
+          encodedName = encodeURIComponent(cleanFilename);
+        }
+      } catch {
+        encodedName = encodeURIComponent(cleanFilename);
+      }
+      fullUrl = `${cleanBase}${encodedName}`;
+    } else {
+      fullUrl = file?.url ? resolveFileUrl(file.url, kkfileviewConfig.nocobaseHost) : '';
+    }
+
+    const isImg = isImageFile(file?.url || fullUrl);
+    const isPdf = isPdfFile(file?.url || fullUrl, file?.extname || '');
+    const ext = getFileExt(file?.url || fullUrl, file?.extname || '');
     return { fullUrl, isImg, isPdf, ext };
-  }, [file?.url, file?.extname, kkfileviewConfig.nocobaseHost]);
+  }, [file, kkfileviewConfig.nocobaseHost]);
 
   // 生成传递给 fileViewer 的文件名。如果展示标题中缺少文件真实扩展名，则自动补齐，以便库正确识别文件类型。
   const viewerFileName = useMemo(() => {
@@ -446,16 +466,80 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     setPreviewMode(next);
   }, [configReady, preferredPreview, enabledModes, enabledAndSupportedModes, fileMeta.isImg, fileMeta.isPdf, file?.url]);
 
+  const [resolvedDirectFileUrl, setResolvedDirectFileUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!isOpen || !fileMeta.fullUrl) {
+      setResolvedDirectFileUrl('');
+      return;
+    }
+    const rawTarget = attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
+    if (!rawTarget.includes('/files/')) {
+      setResolvedDirectFileUrl(rawTarget);
+      return;
+    }
+    let isMounted = true;
+    api.request({
+      url: 'kkfileviewPreview:resolveDirectUrl',
+      method: 'get',
+      params: { url: fileMeta.fullUrl },
+      skipNotify: true,
+    }).then((res: any) => {
+      if (isMounted) {
+        const findDirectUrl = (obj: any): string => {
+          if (!obj || typeof obj !== 'object') return '';
+          if (typeof obj.directUrl === 'string' && /^https?:\/\//i.test(obj.directUrl)) return obj.directUrl;
+          for (const key of Object.keys(obj)) {
+            if (obj[key] && typeof obj[key] === 'object') {
+              const found = findDirectUrl(obj[key]);
+              if (found) return found;
+            }
+          }
+          return '';
+        };
+        const directUrl = findDirectUrl(res);
+        if (directUrl) {
+          setResolvedDirectFileUrl(directUrl);
+        } else {
+          setResolvedDirectFileUrl(rawTarget);
+        }
+      }
+    }).catch(() => {
+      if (isMounted) setResolvedDirectFileUrl(rawTarget);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, fileMeta.fullUrl, api.auth.token, api]);
+
+  const activeTargetFileUrl = useMemo(() => {
+    if (resolvedDirectFileUrl) {
+      return resolvedDirectFileUrl;
+    }
+    if (fileMeta.fullUrl.includes('/files/')) {
+      return '';
+    }
+    return attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
+  }, [resolvedDirectFileUrl, fileMeta.fullUrl, api.auth.token]);
+
   const previewUrlMap = useMemo(
     () =>
       PREVIEW_SERVICE_REGISTRY.reduce((acc, service) => {
-        if (!fileMeta.fullUrl) {
+        if (!fileMeta.fullUrl || !activeTargetFileUrl) {
           acc[service.key] = '';
           return acc;
         }
         if (service.key === 'kkfileview') {
           const baseUrl = `${serviceConfigMap.kkfileview.host.replace(/\/$/, '')}/onlinePreview`;
-          const encodedUrl = encodeURIComponent(btoa(unescape(encodeURIComponent(fileMeta.fullUrl))));
+          let targetUrl = activeTargetFileUrl;
+          try {
+            if (decodeURIComponent(targetUrl) !== targetUrl) {
+              targetUrl = decodeURI(targetUrl);
+            }
+          } catch {
+            // ignore
+          }
+          const encodedUrl = encodeURIComponent(Base64.encode(targetUrl));
           let previewUrl = `${baseUrl}?url=${encodedUrl}`;
           if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
             previewUrl += `&watermarkTxt=${encodeURIComponent(watermarkText)}`;
@@ -465,28 +549,46 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         }
         if (service.key === 'basemetas') {
           const baseUrl = `${serviceConfigMap.basemetas.host.replace(/\/$/, '')}/preview/view`;
-          const url = encodeURIComponent(fileMeta.fullUrl);
+          let targetUrl = activeTargetFileUrl;
+          try {
+            if (decodeURIComponent(targetUrl) !== targetUrl) {
+              targetUrl = decodeURI(targetUrl);
+            }
+          } catch {
+            // ignore
+          }
+          const url = encodeURIComponent(targetUrl);
           const inferredExt = fileMeta.ext ? `.${fileMeta.ext}` : '';
           const ensureExt = (name: string) => {
             if (!inferredExt) return name;
             return name.toLowerCase().endsWith(inferredExt.toLowerCase()) ? name : `${name}${inferredExt}`;
           };
-          const rawFileName = file?.name || fileDisplayTitle || 'file';
+          const safeDecode = (str: string) => {
+            try {
+              return decodeURIComponent(str);
+            } catch {
+              return str;
+            }
+          };
+          const rawFileName = safeDecode(file?.name || fileDisplayTitle || 'file');
           const normalizedFileName = ensureExt(rawFileName);
-          const rawDisplayName = file?.title || fileDisplayTitle || normalizedFileName;
+          const rawDisplayName = safeDecode(file?.title || fileDisplayTitle || normalizedFileName);
           const normalizedDisplayName = ensureExt(rawDisplayName);
           const fileName = encodeURIComponent(normalizedFileName);
           const displayName = encodeURIComponent(normalizedDisplayName);
           let previewUrl = '';
-          if (kkfileviewConfig.basemetasRequestType === 'base64') {
+          const useBase64Mode = true;
+          if (useBase64Mode) {
             const encodedData = encodeURIComponent(Base64.encode(JSON.stringify({
-              url: fileMeta.fullUrl,
+              url: targetUrl,
               fileName: normalizedFileName,
               displayName: normalizedDisplayName,
+              ext: fileMeta.ext,
             })));
             previewUrl = `${baseUrl}?data=${encodedData}`;
           } else {
-            previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}`;
+            const extParam = fileMeta.ext ? `&ext=${encodeURIComponent(fileMeta.ext)}&fileType=${encodeURIComponent(fileMeta.ext)}` : '';
+            previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}${extParam}`;
           }
           if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
             previewUrl += `&watermark=${encodeURIComponent(watermarkText)}`;
@@ -504,7 +606,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
         }
         return acc;
       }, {} as Record<PreviewService, string>),
-    [fileMeta.fullUrl, fileMeta.ext, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType]
+    [activeTargetFileUrl, fileMeta.fullUrl, fileMeta.ext, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType, api.auth.token]
   );
 
   const resolvedPreviewUrl = useMemo(() => {
@@ -587,7 +689,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
       setFileViewerProgress(0); // 重置进度动画状态。
       return; // 跳过 iframe 专属超时逻辑。
     } // 结束 fileViewer 专属加载态分支。
-    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && Boolean(resolvedPreviewUrl); // 计算当前是否需要进入 iframe 加载监控逻辑。
+    const shouldWatchIframe = !unsupportedFile && !fileMeta.isImg && previewMode !== 'fileViewer'; // 计算当前是否需要进入 iframe 加载监控逻辑。
     if (!shouldWatchIframe) {
       iframeLoadedRef.current = false;
       setIframeLoadFailed(false);
@@ -605,7 +707,7 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
     }, 60000);
     return () => window.clearTimeout(timer);
   }, [resolvedPreviewUrl, previewMode, file?.url, unsupportedFile, fileMeta.isImg, iframeRetrySeed]);
-  const showKkfileviewLoading = previewMode === 'kkfileview' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl;
+  const showIframeLoading = previewMode !== 'fileViewer' && iframeLoading && !iframeLoadFailed;
   const showFileViewerLoading = previewMode === 'fileViewer' && iframeLoading && !iframeLoadFailed && !!resolvedPreviewUrl; // 计算 fileViewer 分支是否展示加载中遮罩。
 
   // 模拟进度动画：showFileViewerLoading 为 true 时启动缓慢递增定时器（0→90%），onReady 后跳到 100%。
@@ -1039,26 +1141,36 @@ export const KKFilePreviewer = (props: PreviewerProps) => {
             </div>
           ) : (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              <iframe
-                key={`${resolvedPreviewUrl}-${iframeRetrySeed}`}
-                src={resolvedPreviewUrl}
-                style={{ width: '100%', height: '100%', border: 'none', display: 'block', backgroundColor: '#fff' }}
-                onLoad={() => {
-                  iframeLoadedRef.current = true;
-                  setIframeLoadFailed(false);
-                  setIframeLoading(false);
-                }}
-                onError={() => {
-                  iframeLoadedRef.current = false;
-                  setIframeLoadFailed(true);
-                  setIframeLoading(false);
-                }}
-              />
-              {showKkfileviewLoading ? (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.72)' }}>
+              {resolvedPreviewUrl ? (
+                <iframe
+                  key={`${resolvedPreviewUrl}-${iframeRetrySeed}`}
+                  src={resolvedPreviewUrl}
+                  style={{ width: '100%', height: '100%', border: 'none', display: 'block', backgroundColor: '#fff' }}
+                  onLoad={() => {
+                    iframeLoadedRef.current = true;
+                    setIframeLoadFailed(false);
+                    setIframeLoading(false);
+                  }}
+                  onError={() => {
+                    iframeLoadedRef.current = false;
+                    setIframeLoadFailed(true);
+                    setIframeLoading(false);
+                  }}
+                />
+              ) : null}
+              {showIframeLoading ? (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.72)', zIndex: 10 }}>
                   <Space direction="vertical" align="center" size={8}>
                     <Spin size="large" />
-                    <Typography.Text type="secondary">{t('kkFileView is loading preview...')}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {previewMode === 'basemetas'
+                        ? t('BaseMetas is loading preview...')
+                        : previewMode === 'kkfileview'
+                        ? t('kkFileView is loading preview...')
+                        : previewMode === 'microsoft'
+                        ? t('Microsoft Online Viewer is loading preview...')
+                        : t('Loading preview...')}
+                    </Typography.Text>
                   </Space>
                 </div>
               ) : null}

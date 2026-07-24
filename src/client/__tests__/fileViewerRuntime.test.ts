@@ -14,7 +14,7 @@ describe('fileViewerRuntime', () => { // 定义 fileViewer 运行时工具测试
     } as Window & { __nocobase_public_path__?: string }); // 结束 window 模拟对象定义。
     vi.stubEnv('BUILD_FULL', 'true'); // 桩住 BUILD_FULL 环境变量，模拟完整构建模式。
 
-    expect(resolveFileViewerAssetBase('')).toBe('http://localhost:13000/static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/');
+    expect(resolveFileViewerAssetBase('')).toBe('http://localhost:13000/api/kkfileviewPublicAssets/file-viewer/');
   }); // 结束 BUILD_FULL 本地资源路径推导测试。
 
   it('should fall back to getRuntimePublicBase when window.location is missing in BUILD_FULL mode', () => { // 验证 BUILD_FULL 模式下 window.location 不可用时的行为。
@@ -63,7 +63,7 @@ describe('fileViewerRuntime', () => { // 定义 fileViewer 运行时工具测试
       } as Window & { __nocobase_public_path__?: string });
       vi.stubEnv('BUILD_FULL', '');
 
-      expect(resolveFileViewerAssetBase('', true)).toBe('http://localhost:13000/static/plugins/@nocobase/plugin-file-previewer-kkfileview/public/file-viewer/');
+      expect(resolveFileViewerAssetBase('', true)).toBe('http://localhost:13000/api/kkfileviewPublicAssets/file-viewer/');
     }); // 结束 downloaded 标志测试。
   }); // 结束 CDN 模式专项分组。
 
