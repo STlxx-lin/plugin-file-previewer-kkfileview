@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
@@ -31,29 +33,44 @@ jobs:
         run: |
           npm run build || npx nocobase build || echo "Build step completed."
 
+      - name: Auto Bump Version Tag
+        id: auto_tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+          create_annotated_tag: true
+
+      - name: Resolve Version Information
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          TAG_NAME="${{ steps.auto_tag.outputs.new_tag }}"
+          if [ -z "$TAG_NAME" ]; then
+            TAG_NAME="v${PKG_VER}"
+          fi
+          echo "RELEASE_TAG=${TAG_NAME}" >> $GITHUB_ENV
+          echo "PKG_VERSION=${PKG_VER}" >> $GITHUB_ENV
+          echo "Generated Target Tag: ${TAG_NAME}"
+
       - name: Package Light Version (轻量版 - 无内置静态资产)
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "PLUGIN_VERSION=${VERSION}" >> $GITHUB_ENV
-          
-          # 清理本地可能存在的静态资产
+          # 确保清理本地可能存在的静态资产
           rm -rf public/file-viewer
           
           # 打包轻量版 tgz 与 zip
-          tar -czvf "plugin-file-previewer-kkfileview-v${VERSION}.tgz" \
+          tar -czvf "plugin-file-previewer-kkfileview-${RELEASE_TAG}.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             .
             
-          zip -r "plugin-file-previewer-kkfileview-v${VERSION}.zip" . \
+          zip -r "plugin-file-previewer-kkfileview-${RELEASE_TAG}.zip" . \
             -x "node_modules/*" ".git/*" ".github/*" "storage/*"
 
       - name: Package Full Version (完整版 - 内置 File Viewer 离线资产)
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          
           # 提取 node_modules 中的离线静态资产到 public/file-viewer
           mkdir -p public/file-viewer
           if [ -d "node_modules/@file-viewer/web-full" ]; then
@@ -61,14 +78,14 @@ jobs:
           fi
           
           # 打包完整版 tgz 与 zip
-          tar -czvf "plugin-file-previewer-kkfileview-v${VERSION}-full.tgz" \
+          tar -czvf "plugin-file-previewer-kkfileview-${RELEASE_TAG}-full.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             .
             
-          zip -r "plugin-file-previewer-kkfileview-v${VERSION}-full.zip" . \
+          zip -r "plugin-file-previewer-kkfileview-${RELEASE_TAG}-full.zip" . \
             -x "node_modules/*" ".git/*" ".github/*" "storage/*"
 
           # 清理临时 public 静态资产目录
@@ -76,15 +93,14 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', env.PLUGIN_VERSION) }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || format('Release v{0}', env.PLUGIN_VERSION) }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           draft: false
           prerelease: false
           generate_release_notes: true
           files: |
-            plugin-file-previewer-kkfileview-v*.tgz
-            plugin-file-previewer-kkfileview-v*.zip
+            plugin-file-previewer-kkfileview-*.tgz
+            plugin-file-previewer-kkfileview-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
