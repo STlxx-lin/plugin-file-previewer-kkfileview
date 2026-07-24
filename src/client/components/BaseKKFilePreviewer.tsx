@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
-import { CloseOutlined, LeftOutlined, RightOutlined, PrinterOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
+import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
@@ -83,136 +83,7 @@ function resolveFileDisplayTitle(file?: PreviewFileRecord | null): string {
   }
 }
 
-function openPopupWindow(url: string, features: string = '') {
-  const isBlank = !url || url === '' || url === 'about:blank';
-  const featureList = features
-    ? (isBlank ? features : `${features},noopener,noreferrer`)
-    : (isBlank ? '' : 'noopener,noreferrer');
-  const popup = window.open(url || 'about:blank', '_blank', featureList);
-  if (popup && !isBlank) {
-    try {
-      popup.opener = null;
-    } catch {
-    }
-  }
-  return popup;
-}
 
-async function fetchAsBlobUrl(url: string, defaultMime: string = 'application/pdf', token?: string): Promise<{ blobUrl: string; revoke: () => void }> {
-  try {
-    const headers: HeadersInit = {};
-    let targetUrl = url;
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-      if (!targetUrl.includes('token=')) {
-        const separator = targetUrl.includes('?') ? '&' : '?';
-        targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
-      }
-    }
-    const resp = await fetch(targetUrl, { headers });
-    if (!resp.ok) {
-      throw new Error(`Fetch failed: ${resp.status}`);
-    }
-    const buffer = await resp.arrayBuffer();
-    let mime = defaultMime;
-    const cleanUrl = url.split('?')[0].toLowerCase();
-    if (cleanUrl.endsWith('.pdf')) mime = 'application/pdf';
-    else if (cleanUrl.endsWith('.png')) mime = 'image/png';
-    else if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg')) mime = 'image/jpeg';
-    else if (cleanUrl.endsWith('.gif')) mime = 'image/gif';
-    else if (cleanUrl.endsWith('.svg')) mime = 'image/svg+xml';
-    else if (cleanUrl.endsWith('.webp')) mime = 'image/webp';
-
-    const blob = new Blob([buffer], { type: mime });
-    const blobUrl = URL.createObjectURL(blob);
-    return {
-      blobUrl,
-      revoke: () => {
-        try {
-          URL.revokeObjectURL(blobUrl);
-        } catch {}
-      },
-    };
-  } catch (err) {
-    console.error('fetchAsBlobUrl error:', err);
-    return {
-      blobUrl: url,
-      revoke: () => {},
-    };
-  }
-}
-
-function printImage(src: string, title: string) {
-  const safeTitle = escapeHtml(title);
-  const safeSrc = escapeHtml(src);
-  const w = openPopupWindow('', 'width=800,height=600');
-  if (!w) {
-    openPopupWindow(src);
-    return;
-  }
-  try {
-    w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
-      <style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#fff}
-      img{max-width:100%;max-height:100vh;object-fit:contain}@media print{body{height:100vh}}</style>
-      </head><body><img src="${safeSrc}" onload="window.focus();setTimeout(()=>{window.print();setTimeout(()=>window.close(),500);},300);" /></body></html>`);
-    w.document.close();
-  } catch {
-    openPopupWindow(src);
-  }
-}
-
-function printPdf(src: string) {
-  try {
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;visibility:hidden;';
-    iframe.src = src;
-    document.body.appendChild(iframe);
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch {
-        openPopupWindow(src);
-      }
-      setTimeout(() => {
-        try {
-          document.body.removeChild(iframe);
-        } catch {}
-      }, 3000);
-    };
-  } catch {
-    openPopupWindow(src);
-  }
-}
-
-function printViaPopup(src: string, title: string) {
-  const safeTitle = escapeHtml(title);
-  const safeSrc = escapeHtml(src);
-  const w = openPopupWindow('', 'width=850,height=1100');
-  if (!w) {
-    openPopupWindow(src);
-    return;
-  }
-  try {
-    w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: hidden; background: #fff; }
-        iframe { width: 100%; height: 100vh; border: none; display: block; }
-        @page { size: auto; margin: 0; }
-        @media print {
-          html, body { width: 100%; height: auto; overflow: visible; }
-          iframe { width: 100%; height: 100vh; }
-        }
-      </style>
-      </head><body>
-      <iframe src="${safeSrc}" onload="window.focus();setTimeout(()=>{try{window.print();}catch(e){}},600);"></iframe>
-      </body></html>`);
-    w.document.close();
-  } catch {
-    openPopupWindow(src);
-  }
-}
 
 type EmbedHtmlConfig = {
   width: string;
@@ -780,55 +651,16 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     };
   }, [showFileViewerLoading]);
 
-  const handlePrint = useCallback(async () => {
-    if (!file?.url) return;
-    if (unsupportedFile) return;
-
-    const activeIframe = previewContainerRef.current?.querySelector('iframe');
-    if (activeIframe && activeIframe.contentWindow) {
-      try {
-        activeIframe.contentWindow.focus();
-        activeIframe.contentWindow.print();
-        return;
-      } catch {
-        // 同源/跨域限制触发时自动降级至 Blob URL 打印
-      }
-    }
-
-    const printTargetUrl = (previewMode && resolvedPreviewUrl) ? resolvedPreviewUrl : fileMeta.fullUrl;
-    let blobInfo: { blobUrl: string; revoke: () => void } | null = null;
-    try {
-      const mime = fileMeta.isImg ? 'image/png' : 'application/pdf';
-      blobInfo = await fetchAsBlobUrl(printTargetUrl, mime, api.auth?.token);
-    } catch {
-      blobInfo = { blobUrl: printTargetUrl, revoke: () => {} };
-    }
-
-    const finalUrl = blobInfo.blobUrl;
-    const cleanup = () => {
-      setTimeout(() => {
-        blobInfo?.revoke();
-      }, 5000);
-    };
-
-    if (fileMeta.isImg) {
-      printImage(finalUrl, fileDisplayTitle || 'Image');
-      cleanup();
-    } else if (fileMeta.isPdf) {
-      printPdf(finalUrl);
-      cleanup();
-    } else {
-      printViaPopup(finalUrl, fileDisplayTitle || 'Document');
-      cleanup();
-    }
-  }, [file, previewMode, fileMeta, resolvedPreviewUrl, unsupportedFile, fileDisplayTitle, api]);
 
   const handleOpenNewWindow = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (unsupportedFile) return;
     if (!resolvedPreviewUrl) return;
-    openPopupWindow(resolvedPreviewUrl);
+    const popup = window.open(resolvedPreviewUrl, '_blank', 'noopener,noreferrer');
+    if (popup) {
+      try { popup.opener = null; } catch {}
+    }
   }, [resolvedPreviewUrl, unsupportedFile]);
 
   const openEmbedConfigModal = useCallback((e: React.MouseEvent) => {
