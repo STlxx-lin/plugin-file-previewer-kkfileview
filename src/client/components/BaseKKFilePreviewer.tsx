@@ -84,8 +84,12 @@ function resolveFileDisplayTitle(file?: PreviewFileRecord | null): string {
 }
 
 function openPopupWindow(url: string, features: string = '') {
-  const popup = window.open(url, '_blank', features ? `${features},noopener,noreferrer` : 'noopener,noreferrer');
-  if (popup) {
+  const isBlank = !url || url === '' || url === 'about:blank';
+  const featureList = features
+    ? (isBlank ? features : `${features},noopener,noreferrer`)
+    : (isBlank ? '' : 'noopener,noreferrer');
+  const popup = window.open(url || 'about:blank', '_blank', featureList);
+  if (popup && !isBlank) {
     try {
       popup.opener = null;
     } catch {
@@ -96,19 +100,27 @@ function openPopupWindow(url: string, features: string = '') {
 
 function printImage(src: string, title: string) {
   const safeTitle = escapeHtml(title);
+  const safeSrc = escapeHtml(src);
   const w = openPopupWindow('', 'width=800,height=600');
-  if (!w) return;
-  w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
-    <style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh}
-    img{max-width:100%;max-height:100vh;object-fit:contain}@media print{body{height:100vh}}</style>
-    </head><body><img src="${src}" onload="window.focus();window.print();setTimeout(()=>window.close(),300);" /></body></html>`);
-  w.document.close();
+  if (!w) {
+    openPopupWindow(src);
+    return;
+  }
+  try {
+    w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
+      <style>*{margin:0;padding:0}body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#fff}
+      img{max-width:100%;max-height:100vh;object-fit:contain}@media print{body{height:100vh}}</style>
+      </head><body><img src="${safeSrc}" onload="window.focus();setTimeout(()=>{window.print();setTimeout(()=>window.close(),500);},300);" /></body></html>`);
+    w.document.close();
+  } catch {
+    openPopupWindow(src);
+  }
 }
 
 function printPdf(src: string) {
   try {
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;';
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;visibility:hidden;';
     iframe.src = src;
     document.body.appendChild(iframe);
     iframe.onload = () => {
@@ -118,7 +130,11 @@ function printPdf(src: string) {
       } catch {
         openPopupWindow(src);
       }
-      setTimeout(() => document.body.removeChild(iframe), 2000);
+      setTimeout(() => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {}
+      }, 3000);
     };
   } catch {
     openPopupWindow(src);
@@ -127,23 +143,31 @@ function printPdf(src: string) {
 
 function printViaPopup(src: string, title: string) {
   const safeTitle = escapeHtml(title);
-  const w = openPopupWindow('', 'width=794,height=1123,left=0,top=0');
-  if (!w) return;
-  w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 100%; height: 100%; overflow: hidden; }
-      iframe { width: 100%; height: 100vh; border: none; display: block; }
-      @page { size: auto; margin: 0; }
-      @media print {
-        html, body { width: 100%; height: auto; overflow: visible; }
-        iframe { width: 100%; height: 100vh; }
-      }
-    </style>
-    </head><body>
-    <iframe src="${src}" onload="window.focus();window.print();"></iframe>
-    </body></html>`);
-  w.document.close();
+  const safeSrc = escapeHtml(src);
+  const w = openPopupWindow('', 'width=850,height=1100');
+  if (!w) {
+    openPopupWindow(src);
+    return;
+  }
+  try {
+    w.document.write(`<!DOCTYPE html><html><head><title>${safeTitle}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #fff; }
+        iframe { width: 100%; height: 100vh; border: none; display: block; }
+        @page { size: auto; margin: 0; }
+        @media print {
+          html, body { width: 100%; height: auto; overflow: visible; }
+          iframe { width: 100%; height: 100vh; }
+        }
+      </style>
+      </head><body>
+      <iframe src="${safeSrc}" onload="window.focus();setTimeout(()=>{try{window.print();}catch(e){}},600);"></iframe>
+      </body></html>`);
+    w.document.close();
+  } catch {
+    openPopupWindow(src);
+  }
 }
 
 type EmbedHtmlConfig = {
@@ -715,6 +739,18 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const handlePrint = useCallback(() => {
     if (!file?.url) return;
     if (unsupportedFile) return;
+
+    const activeIframe = previewContainerRef.current?.querySelector('iframe');
+    if (activeIframe && activeIframe.contentWindow) {
+      try {
+        activeIframe.contentWindow.focus();
+        activeIframe.contentWindow.print();
+        return;
+      } catch {
+        // 同源/跨域限制触发时自动降级至独立打印窗口
+      }
+    }
+
     if (fileMeta.isImg) {
       printImage(fileMeta.fullUrl, fileDisplayTitle || 'Image');
     } else if (fileMeta.isPdf) {
