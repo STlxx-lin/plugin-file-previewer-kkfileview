@@ -1040,13 +1040,31 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
               </div>
             </div>
           )}
+
+          {isPreviewFullscreen && (
+            <Button
+              icon={<FullscreenExitOutlined />}
+              onClick={handleToggleFullscreen}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                zIndex: 100,
+                backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                color: '#fff',
+                borderColor: 'transparent',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}
+            >
+              {t('Exit Fullscreen')}
+            </Button>
+          )}
         </div>
 
         <div style={{ padding: '10px 16px', borderTop: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <Space size="middle">
             {enabledModes.length > 1 && (
               <Radio.Group
-                size="small"
                 value={previewMode}
                 onChange={(e) => setPreviewMode(e.target.value as PreviewService)}
                 optionType="button"
@@ -1061,9 +1079,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             )}
 
             {hasPagination && (
-              <Space size="small">
+              <Space size="middle">
                 <Button
-                  size="small"
                   icon={<LeftOutlined />}
                   disabled={index! <= 0}
                   onClick={() => onSwitchIndex && onSwitchIndex(index! - 1)}
@@ -1072,7 +1089,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                   {currentDisplayIndex} / {totalDisplayCount}
                 </Typography.Text>
                 <Button
-                  size="small"
                   icon={<RightOutlined />}
                   disabled={index! >= list!.length - 1}
                   onClick={() => onSwitchIndex && onSwitchIndex(index! + 1)}
@@ -1081,33 +1097,33 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             )}
           </Space>
 
-          <Space size="small">
+          <Space size="middle">
             {kkfileviewConfig.enablePrint !== false && (
-              <Button size="small" icon={<PrinterOutlined />} onClick={handlePrint} disabled={unsupportedFile || !fileMeta.fullUrl}>
+              <Button icon={<PrinterOutlined />} onClick={handlePrint} disabled={unsupportedFile || !fileMeta.fullUrl}>
                 {t('Print')}
               </Button>
             )}
             {kkfileviewConfig.enableOpenInNewWindow !== false && (
-              <Button size="small" onClick={handleOpenNewWindow} disabled={unsupportedFile || !resolvedPreviewUrl}>
+              <Button onClick={handleOpenNewWindow} disabled={unsupportedFile || !resolvedPreviewUrl}>
                 {t('Open in new window')}
               </Button>
             )}
             {canSeeCopyEmbedButton && (
-              <Button size="small" onClick={openEmbedConfigModal} disabled={unsupportedFile || !resolvedPreviewUrl}>
+              <Button onClick={openEmbedConfigModal} disabled={unsupportedFile || !resolvedPreviewUrl}>
                 {t('Copy Embed HTML')}
               </Button>
             )}
             {kkfileviewConfig.enableFullscreenButton !== false && (
-              <Button size="small" icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
+              <Button icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
                 {isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}
               </Button>
             )}
             {kkfileviewConfig.enableDownload !== false && (
-              <Button size="small" type="primary" onClick={handleDownload} disabled={!fileMeta.fullUrl}>
+              <Button type="primary" onClick={handleDownload} disabled={!fileMeta.fullUrl}>
                 {t('Download')}
               </Button>
             )}
-            <Button size="small" onClick={handleClose}>
+            <Button onClick={handleClose}>
               {t('Close')}
             </Button>
           </Space>
