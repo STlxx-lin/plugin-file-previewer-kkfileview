@@ -924,7 +924,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                         ? DEFAULT_FILE_VIEWER_EXTENSIONS
                         : DEFAULT_EXTENSIONS;
 
-                acc[service.extensionsField] = parseExtensionsInput(
+                acc[service.extensionsField] = parseExtensions(
                     values[service.extensionsField],
                     extensionFallback
                 );
