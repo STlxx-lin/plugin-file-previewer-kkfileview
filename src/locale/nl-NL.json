@@ -173,5 +173,11 @@
   "Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.": "Vereist het downloaden van ongeveer 170 MB aan statische bronnen.",
   "Static files downloaded/copied successfully": "Statische bestanden succesvol gedownload/gekopieerd",
   "Failed to download File Viewer static files": "Fout bij downloaden van statische File Viewer-bestanden",
-  "Loading preview component...": "Preview-component laden..."
+  "Loading preview component...": "Preview-component laden...",
+  "CDN Mode": "CDN-modus",
+  "CDN Mode (direct link)": "CDN-modus (directe link)",
+  "Proxy Mode": "Proxy-modus",
+  "Proxy Mode (authenticated)": "Proxy-modus (geverifieerd)",
+  "Enable File Viewer CDN Toggle Button": "CDN-wisselknop voor File Viewer inschakelen",
+  "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "Toon CDN/Proxy-modusknop in voorbeeldvenster bij gebruik van File Viewer (standaard ingeschakeld)"
 }

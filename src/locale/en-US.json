@@ -173,5 +173,11 @@
     "Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.": "Requires copying/downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.",
     "Static files downloaded/copied successfully": "Static files downloaded/copied successfully",
     "Failed to download File Viewer static files": "Failed to download File Viewer static files",
-    "Loading preview component...": "Loading preview component..."
+    "Loading preview component...": "Loading preview component...",
+    "CDN Mode": "CDN Mode",
+    "CDN Mode (direct link)": "CDN Mode (direct link)",
+    "Proxy Mode": "Proxy Mode",
+    "Proxy Mode (authenticated)": "Proxy Mode (authenticated)",
+    "Enable File Viewer CDN Toggle Button": "Enable File Viewer CDN Toggle Button",
+    "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)"
 }

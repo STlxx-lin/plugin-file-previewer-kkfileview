@@ -173,5 +173,11 @@
   "Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.": "需要提取/下载约 170MB 的静态资源以在本地运行。未下载时将自动兜底使用 unpkg CDN 模式。",
   "Static files downloaded/copied successfully": "静态文件下载/提取成功",
   "Failed to download File Viewer static files": "提取 File Viewer 静态文件失败",
-  "Loading preview component...": "正在加载预览组件..."
+  "Loading preview component...": "正在加载预览组件...",
+  "CDN Mode": "CDN 模式",
+  "CDN Mode (direct link)": "CDN 模式（直链）",
+  "Proxy Mode": "代理模式",
+  "Proxy Mode (authenticated)": "代理模式（认证）",
+  "Enable File Viewer CDN Toggle Button": "显示 File Viewer CDN 切换按鈕",
+  "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "当使用 File Viewer 引擎时，在预览弹窗中显示 CDN/代理模式切换按鈕（默认开启）"
 }
