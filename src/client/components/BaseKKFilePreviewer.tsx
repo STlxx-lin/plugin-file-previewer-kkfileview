@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
-import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
+import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined, GlobalOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
@@ -545,6 +545,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const [iframeLoadFailed, setIframeLoadFailed] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
   const [iframeRetrySeed, setIframeRetrySeed] = useState(0);
+  const [fileViewerCdnMode, setFileViewerCdnMode] = useState(false);
   const [fileViewerProgress, setFileViewerProgress] = useState<number>(0);
   const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iframeLoadedRef = useRef(false);
@@ -705,6 +706,23 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     setIframeRetrySeed((value) => value + 1);
   }, []);
 
+  const handleToggleCdnMode = useCallback(() => {
+    setFileViewerCdnMode((prev) => !prev);
+    // 切换模式后重新挂载 FileViewer 以使新的 fetch 策略立即生效
+    setIframeRetrySeed((value) => value + 1);
+    iframeLoadedRef.current = false;
+    setIframeLoadFailed(false);
+    setIframeLoading(true);
+    setFileViewerProgress(0);
+  }, []);
+
+  // previewMode 切换离开 fileViewer 时，重置 CDN 模式为默认的代理模式
+  useEffect(() => {
+    if ((previewMode as string) !== 'fileViewer') {
+      setFileViewerCdnMode(false);
+    }
+  }, [previewMode]);
+
   useEffect(() => {
     if (!isPreviewFullscreen) {
       setFullscreenViewportSize({ width: 0, height: 0 });
@@ -864,10 +882,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {resolvedPreviewUrl ? (
                 <FileViewerRenderer
+                  key={`fv-${iframeRetrySeed}`}
                   fileUrl={resolvedPreviewUrl}
                   fileName={viewerFileName}
                   assetBase={serviceConfigMap.fileViewer.host}
-                  fetchFile={fetchFileWithAuth}
+                  fetchFile={fileViewerCdnMode ? undefined : fetchFileWithAuth}
                   onReady={() => {
                     iframeLoadedRef.current = true;
                     setIframeLoadFailed(false);
@@ -1099,6 +1118,26 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
               ) : (
                 <Button icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
                   {isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}
+                </Button>
+              )
+            )}
+            {(previewMode as string) === 'fileViewer' && (
+              isMobileViewport ? (
+                <Tooltip title={fileViewerCdnMode ? t('CDN Mode (direct link)') : t('Proxy Mode (authenticated)')}>
+                  <Button
+                    size="small"
+                    icon={<GlobalOutlined />}
+                    onClick={handleToggleCdnMode}
+                    type={fileViewerCdnMode ? 'primary' : 'default'}
+                  />
+                </Tooltip>
+              ) : (
+                <Button
+                  icon={<GlobalOutlined />}
+                  onClick={handleToggleCdnMode}
+                  type={fileViewerCdnMode ? 'primary' : 'default'}
+                >
+                  {fileViewerCdnMode ? t('CDN Mode') : t('Proxy Mode')}
                 </Button>
               )
             )}
