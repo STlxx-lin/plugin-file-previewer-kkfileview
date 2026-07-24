@@ -1,9 +1,23 @@
-node_modules
-dist
-lib
-coverage
-.DS_Store
-*.log
-.env
-public/file-viewer/
+# Dependencies
+node_modules/
 
+# Build outputs
+dist/
+lib/
+coverage/
+
+# Temporary Assets & Archives
+public/file-viewer/
+*.tgz
+*.zip
+storage/
+
+# Environment & Logs
+.env
+*.log
+
+# IDE & System
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
