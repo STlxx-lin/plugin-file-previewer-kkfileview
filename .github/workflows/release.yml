@@ -37,25 +37,24 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "RELEASE_VERSION=${VERSION}" >> $GITHUB_ENV
+          mkdir -p /tmp/release-artifacts
 
       - name: Package Light Version (轻量版 - 无内置静态资产)
         run: |
           # 清理本地可能存在的静态资产
           rm -rf public/file-viewer
           
-          # 打包轻量版 tgz 与 zip（排除 docs/images, docs 以及生成的压缩文件）
-          tar -czvf "plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.tgz" \
+          # 打包轻量版 tgz 与 zip（输出至外部 /tmp/release-artifacts 避免文件变化冲突）
+          tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             --exclude="docs" \
-            --exclude="*.tgz" \
-            --exclude="*.zip" \
             .
             
-          zip -r "plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.zip" . \
-            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "*.tgz" "*.zip"
+          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.zip" . \
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*"
 
       - name: Package Full Version (完整版 - 内置 File Viewer 离线资产)
         run: |
@@ -65,19 +64,17 @@ jobs:
             cp -r node_modules/@file-viewer/web-full/* public/file-viewer/ || true
           fi
           
-          # 打包完整版 tgz 与 zip（排除 docs/images, docs 以及生成的压缩文件）
-          tar -czvf "plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.tgz" \
+          # 打包完整版 tgz 与 zip（输出至外部 /tmp/release-artifacts）
+          tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
             --exclude=".github" \
             --exclude="storage" \
             --exclude="docs" \
-            --exclude="*.tgz" \
-            --exclude="*.zip" \
             .
             
-          zip -r "plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.zip" . \
-            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "*.tgz" "*.zip"
+          zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.zip" . \
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*"
 
           # 清理临时 public 静态资产目录
           rm -rf public/file-viewer
@@ -92,7 +89,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            plugin-file-previewer-kkfileview-v*.tgz
-            plugin-file-previewer-kkfileview-v*.zip
+            /tmp/release-artifacts/plugin-file-previewer-kkfileview-v*.tgz
+            /tmp/release-artifacts/plugin-file-previewer-kkfileview-v*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
