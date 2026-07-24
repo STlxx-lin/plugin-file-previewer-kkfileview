@@ -1,6 +1,6 @@
 # @nocobase/plugin-file-previewer-kkfileview
 
-[![浏览量](https://komarev.com/ghpvc/?username=nocobase-plugin-file-previewer-kkfileview&color=007ec6&style=flat-square&label=%E7%80%8F%E8%A7%8D%E9%87%8F)](https://github.com)
+[![浏览量](https://komarev.com/ghpvc/?username=nocobase-file-previewer-kkfileview&color=007ec6&style=flat-square&label=%E7%80%8F%E8%A7%8D%E9%87%8F)](https://github.com)
 [![NocoBase Version](https://img.shields.io/badge/NocoBase-2.1.x%20%7C%202.2.x-brightgreen.svg)](https://www.nocobase.com)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
