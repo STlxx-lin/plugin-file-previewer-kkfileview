@@ -179,7 +179,12 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
         };
 
         if (normalizedWatermark) {
-          viewerOptions.watermark = normalizedWatermark;
+          viewerOptions.watermark = {
+            text: normalizedWatermark,
+            opacity: 0.18,
+            color: 'rgba(0, 0, 0, 0.18)',
+            rotate: -24,
+          };
         }
 
         if (enableDownload === false || toolbarPosition) {
