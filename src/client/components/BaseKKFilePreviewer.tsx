@@ -357,10 +357,13 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     return title;
   }, [fileDisplayTitle, fileMeta.ext]);
 
-  const watermarkText = useMemo(
-    () => resolveWatermarkTemplate(kkfileviewConfig.watermark || '', { user: currentUser, requestedAt: requestedAtRef.current }).trim(),
-    [kkfileviewConfig.watermark, currentUser]
-  );
+  const watermarkText = useMemo(() => {
+    const rawTemplate = kkfileviewConfig.watermark || '';
+    const resolved = resolveWatermarkTemplate(rawTemplate, { user: currentUser, requestedAt: requestedAtRef.current }).trim();
+    if (resolved) return resolved;
+    const fallbackUser = currentUser?.nickname || currentUser?.username || '';
+    return fallbackUser ? `${fallbackUser}` : 'NocoBase';
+  }, [kkfileviewConfig.watermark, currentUser]);
 
   const modeSupportedMap = useMemo(
     () =>
@@ -461,9 +464,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           }
           const encodedUrl = encodeURIComponent(Base64.encode(targetUrl));
           let previewUrl = `${baseUrl}?url=${encodedUrl}`;
-          if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
-            const safeWm = encodeURIComponent(watermarkText);
-            previewUrl += `&watermarkTxt=${safeWm}&watermarkXSpace=10&watermarkYSpace=10&watermarkFontsize=18px&watermarkColor=rgba(0,0,0,0.18)&watermarkAlpha=0.18&watermarkAngle=30`;
+          if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
+            previewUrl += `&watermarkTxt=${encodeURIComponent(watermarkText)}`;
           }
           acc[service.key] = previewUrl;
           return acc;
@@ -499,19 +501,21 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           const displayName = encodeURIComponent(normalizedDisplayName);
           let previewUrl = '';
           const useBase64Mode = kkfileviewConfig.basemetasRequestType === 'base64';
+
           if (useBase64Mode) {
             const payloadObj: Record<string, any> = {
               url: targetUrl,
               fileName: normalizedFileName,
               displayName: normalizedDisplayName,
-              ext: fileMeta.ext,
             };
-            if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
-              payloadObj.watermark = watermarkText;
+            if (fileMeta.ext) {
+              payloadObj.ext = fileMeta.ext;
+            }
+            if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
+              payloadObj.watermark = {
+                value: watermarkText,
+              };
               payloadObj.watermarkTxt = watermarkText;
-              payloadObj.watermarkFontsize = '18px';
-              payloadObj.watermarkColor = 'rgba(0,0,0,0.18)';
-              payloadObj.watermarkAlpha = '0.18';
             }
             const encodedData = encodeURIComponent(Base64.encode(JSON.stringify(payloadObj)));
             previewUrl = `${baseUrl}?data=${encodedData}`;
@@ -519,9 +523,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             const extParam = fileMeta.ext ? `&ext=${encodeURIComponent(fileMeta.ext)}&fileType=${encodeURIComponent(fileMeta.ext)}` : '';
             previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}${extParam}`;
           }
-          if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
+
+          if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
             const safeWm = encodeURIComponent(watermarkText);
-            previewUrl += `&watermark=${safeWm}&watermarkTxt=${safeWm}&watermarkFontsize=18px&watermarkColor=rgba(0,0,0,0.18)&watermarkAlpha=0.18`;
+            previewUrl += `&watermark=${safeWm}&watermarkTxt=${safeWm}`;
           }
           acc[service.key] = previewUrl;
           return acc;
