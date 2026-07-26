@@ -58,6 +58,53 @@ function cleanupViewerController(controller: FileViewerController | null | undef
   } // 结束宿主节点清理分支。
 } // 结束控制器统一清理工具定义。
 
+/**
+ * 将掩膜打印所需的 .fv-print-mask-* CSS 注入到宿主内的 ShadowRoot（如有）。
+ * 库自身（flyfish-file-viewer-web-full.iife.js）在触发掩膜打印时会把这段 CSS
+ * 通过 Li(document) 写入 document.head，但 ShadowRoot 内的元素无法继承
+ * document.head 的样式表，导致掩膜工具栏显示异常。此函数在挂载后手动将同样的
+ * CSS 再追加一份到 ShadowRoot 的 adoptedStyleSheets，使其在隔离环境中也能生效。
+ */
+function injectPrintMaskCssToShadowRoot(host: HTMLDivElement): void {
+  // IIFE 内部 Di 变量的完整 CSS，逐字同步以确保选择器/样式一致
+  const PRINT_MASK_CSS = `
+.fv-print-mask-layer{position:absolute;inset:0;z-index:2147483000;pointer-events:none;}
+.fv-print-mask-canvas{position:absolute;inset:0;z-index:2147483000;pointer-events:none;cursor:default;}
+.fv-print-mask-canvas.is-armed{pointer-events:auto;cursor:crosshair;touch-action:none;}
+.fv-print-mask-block{position:absolute;background:#000;box-sizing:border-box;pointer-events:auto;}
+.fv-print-mask-block-remove{position:absolute;right:-8px;top:-8px;width:18px;height:18px;border:0;border-radius:999px;background:#111;color:#fff;font:700 12px/18px system-ui,sans-serif;cursor:pointer;padding:0;}
+.fv-print-mask-toolbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483001;display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid rgba(20,35,53,.12);border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 12px 28px rgba(15,23,42,.16);pointer-events:auto;max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center;}
+.fv-print-mask-toolbar span{font:600 12px/1.2 system-ui,sans-serif;color:#40546a;white-space:nowrap;}
+.fv-print-mask-toolbar button{min-width:42px;height:30px;padding:0 10px;border:0;border-radius:999px;background:transparent;color:#40546a;font:800 12px/1 system-ui,sans-serif;cursor:pointer;}
+.fv-print-mask-toolbar button:hover,.fv-print-mask-toolbar button.is-active{background:rgba(33,163,102,.1);color:#16774c;}
+.fv-print-mask-toolbar button.primary{background:#16774c;color:#fff;}
+.fv-print-mask-toolbar button.primary:hover{background:#0f5f3c;}
+`;
+
+  try {
+    // 库直接在 host 上调用 attachShadow({mode:"open"})（见 fo 函数：e.attachShadow(...)，e === host）
+    // 因此 ShadowRoot 挂在 host.shadowRoot 上，而非子元素上。
+    const shadowRoot = host.shadowRoot;
+
+    if (shadowRoot) {
+      // 优先用 adoptedStyleSheets（现代浏览器均支持）
+      if (typeof CSSStyleSheet !== 'undefined' && 'replace' in CSSStyleSheet.prototype) {
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(PRINT_MASK_CSS);
+        shadowRoot.adoptedStyleSheets = [...shadowRoot.adoptedStyleSheets, sheet];
+      } else {
+        // 降级：在 ShadowRoot 内插入 <style> 节点
+        const style = shadowRoot.ownerDocument.createElement('style');
+        style.id = 'fv-print-mask-designer-style-shadow';
+        style.textContent = PRINT_MASK_CSS;
+        shadowRoot.appendChild(style);
+      }
+    }
+  } catch {
+    // 注入失败时静默忽略，不影响主渲染流程
+  }
+}
+
 // 全局缓存已经加载完的 script 状态。
 const scriptLoadCache = new Map<string, Promise<void>>();
 
@@ -181,18 +228,14 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
 
         const normalizedWatermark = watermark ? String(watermark).trim() : '';
 
-        // 遵循官方规范构建 options 配置：options.watermark 支持文字/图片水印，options.printMask 支持掩膜打印，options.toolbar 控制下载/打印/掩膜/位置等
+        // 遵循官方规范构建 options 配置
+        // styleIsolation: 'shadow'（默认）— 使用 ShadowRoot 隔离，确保库内部工具栏样式不受 NocoBase/AntD 全局 CSS 干扰。
+        // 掩膜打印所需的 .fv-print-mask-* CSS 将在挂载后补注入到 ShadowRoot，解决 Shadow DOM 无法继承 document.head 样式的问题。
         const viewerOptions: Record<string, any> = {
-          styleIsolation: styleIsolation || 'auto', // 默认使用 auto 智能隔离
-          printMask: true, // 显式开启掩膜打印功能（支持拖拽绘制黑色遮盖块）
-          print: true, // 显式开启打印响应
-          toolbar: {
-            show: true,
-            visible: true,
-            download: enableDownload !== false,
-            print: true,
-            printMask: true, // 工具栏显示掩膜打印按钮
-          },
+          styleIsolation: styleIsolation || 'shadow',
+          toolbar: typeof enableDownload === 'boolean' && !enableDownload
+            ? { download: false }
+            : true, // true = 使用库默认完整工具栏（由渲染器能力决定显示打印/下载等按钮）
         };
 
         if (normalizedWatermark) {
@@ -205,18 +248,12 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
         }
 
         const mountParams: Record<string, any> = {
-          url: fileUrl, // 官方可用参数：url (文件地址)
-          name: fileName, // 官方可用参数：name (文件名)
-          filename: fileName, // 兼容 filename 别名
-          watermark: normalizedWatermark, // 官方可用参数/JS Property: watermark
-          options: viewerOptions, // 官方可用参数：options (包含 watermark、styleIsolation、toolbar 等)
-          // 顶层透传，兼容底层组件直接从 props/attributes 寻址的链路
-          print: true,
-          printMask: true,
-          download: enableDownload !== false,
-          toolbar: enableDownload === false ? { show: true, visible: true, download: false, print: true, printMask: true } : true,
-          styleIsolation: styleIsolation || 'auto',
-          onEvent: (event: any) => { // 官方可用参数：onEvent 状态与生命周期监听
+          url: fileUrl,
+          name: fileName,
+          filename: fileName,
+          watermark: normalizedWatermark,
+          options: viewerOptions,
+          onEvent: (event: any) => {
             if (event?.type === 'ready' || event?.type === 'loaded') {
               onReadyRef.current?.();
             } else if (event?.type === 'error') {
@@ -244,6 +281,10 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
           return; // 结束当前挂载流程，避免触发成功回调。
         } // 结束卸载后补清理分支。
 
+        // 将掩膜打印所需的 CSS 注入到 ShadowRoot（如有），确保 .fv-print-mask-* 样式在 Shadow DOM 内生效。
+        // 库自身只把这段 CSS 注入到 document.head，Shadow DOM 内的元素无法继承，需手动补注。
+        injectPrintMaskCssToShadowRoot(host);
+
         onReadyRef.current?.(); // 在挂载成功后通知宿主关闭加载态。
       } catch (error) { // 处理动态导入或挂载时的所有异常。
         if (disposed) { // 当组件已卸载时忽略后续异常通知。
@@ -263,11 +304,6 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <style dangerouslySetInnerHTML={{ __html: `
-        .fv-print-mask-toolbar {
-          z-index: 99999 !important;
-        }
-      ` }} />
       <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
     </div>
   );

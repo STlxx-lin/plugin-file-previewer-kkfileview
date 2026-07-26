@@ -743,6 +743,39 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   </div>
   <script src="${scriptUrl}"></script>
   <script>
+    // 将掩膜打印所需的 .fv-print-mask-* CSS 注入到 ShadowRoot（与主窗口逻辑保持一致）
+    // 库自身将此 CSS 写入 document.head，但 ShadowRoot 内元素无法继承，需手动补注入。
+    function injectPrintMaskCss(host) {
+      var PRINT_MASK_CSS = [
+        '.fv-print-mask-layer{position:absolute;inset:0;z-index:2147483000;pointer-events:none;}',
+        '.fv-print-mask-canvas{position:absolute;inset:0;z-index:2147483000;pointer-events:none;cursor:default;}',
+        '.fv-print-mask-canvas.is-armed{pointer-events:auto;cursor:crosshair;touch-action:none;}',
+        '.fv-print-mask-block{position:absolute;background:#000;box-sizing:border-box;pointer-events:auto;}',
+        '.fv-print-mask-block-remove{position:absolute;right:-8px;top:-8px;width:18px;height:18px;border:0;border-radius:999px;background:#111;color:#fff;font:700 12px/18px system-ui,sans-serif;cursor:pointer;padding:0;}',
+        '.fv-print-mask-toolbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483001;display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid rgba(20,35,53,.12);border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 12px 28px rgba(15,23,42,.16);pointer-events:auto;max-width:calc(100% - 24px);flex-wrap:wrap;justify-content:center;}',
+        '.fv-print-mask-toolbar span{font:600 12px/1.2 system-ui,sans-serif;color:#40546a;white-space:nowrap;}',
+        '.fv-print-mask-toolbar button{min-width:42px;height:30px;padding:0 10px;border:0;border-radius:999px;background:transparent;color:#40546a;font:800 12px/1 system-ui,sans-serif;cursor:pointer;}',
+        '.fv-print-mask-toolbar button:hover,.fv-print-mask-toolbar button.is-active{background:rgba(33,163,102,.1);color:#16774c;}',
+        '.fv-print-mask-toolbar button.primary{background:#16774c;color:#fff;}',
+        '.fv-print-mask-toolbar button.primary:hover{background:#0f5f3c;}'
+      ].join('');
+      try {
+        var shadowRoot = host.shadowRoot;
+        if (shadowRoot) {
+          if (typeof CSSStyleSheet !== 'undefined' && CSSStyleSheet.prototype.replaceSync) {
+            var sheet = new CSSStyleSheet();
+            sheet.replaceSync(PRINT_MASK_CSS);
+            shadowRoot.adoptedStyleSheets = Array.from(shadowRoot.adoptedStyleSheets).concat(sheet);
+          } else {
+            var style = document.createElement('style');
+            style.id = 'fv-print-mask-designer-style-shadow';
+            style.textContent = PRINT_MASK_CSS;
+            shadowRoot.appendChild(style);
+          }
+        }
+      } catch(e) { /* 注入失败时静默忽略 */ }
+    }
+
     (function() {
       var attempts = 0;
       function startViewer() {
@@ -762,7 +795,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           globalLib.setDefaultFullAssetBaseUrl(${safeAssetBase});
         }
         var wm = ${safeWatermark};
-        var options = { styleIsolation: 'shadow' };
+        var options = { styleIsolation: 'shadow', toolbar: true };
         if (wm) {
           options.watermark = wm;
         }
@@ -773,6 +806,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             filename: ${safeFileName},
             options: options
           });
+          // 掩膜打印 CSS 补注入，确保 Shadow DOM 内掩膜工具栏样式正常
+          injectPrintMaskCss(host);
           if (loadingMask) {
             loadingMask.style.opacity = '0';
             setTimeout(function() { if (loadingMask.parentNode) loadingMask.parentNode.removeChild(loadingMask); }, 300);
@@ -1019,6 +1054,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                   watermarkColor={kkfileviewConfig.watermarkColor}
                   enableDownload={kkfileviewConfig.enableDownload !== false}
                   assetBase={serviceConfigMap.fileViewer.host}
+                  fileViewerDownloaded={Boolean(kkfileviewConfig.fileViewerDownloaded)}
                   fetchFile={kkfileviewConfig.fileViewerLoadMode === 'cdn' ? undefined : fetchFileWithAuth}
                   onReady={() => {
                     iframeLoadedRef.current = true;
@@ -1032,6 +1068,9 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                     setIframeLoadFailed(true);
                     setIframeLoading(false);
                     setFileViewerProgress(0);
+                  }}
+                  onProgress={(percent) => {
+                    setFileViewerProgress(percent);
                   }}
                 />
               ) : null}
