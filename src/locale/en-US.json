@@ -175,5 +175,15 @@
     "File Viewer Default Load Mode": "File Viewer Default Load Mode",
     "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).",
     "Proxy Mode (default, authenticated)": "Proxy Mode (default, authenticated)",
-    "CDN Mode (direct link)": "CDN Mode (direct link)"
+    "CDN Mode (direct link)": "CDN Mode (direct link)",
+    "Watermark Opacity": "Watermark Opacity",
+    "Watermark Angle": "Watermark Angle",
+    "Watermark Color": "Watermark Color",
+    "Range: 0.01 - 1.0 (default 0.18)": "Range: 0.01 - 1.0 (default 0.18)",
+    "Range: -180 to 180 (default -24)": "Range: -180 to 180 (default -24)",
+    "e.g. rgba(0,0,0,0.18) or #1f7a58": "e.g. rgba(0,0,0,0.18) or #1f7a58",
+    "Configure": "Configure",
+    "Service Settings": "Service Settings",
+    "Configure server address for this service": "Configure server address for this service",
+    "Select file formats for this preview service": "Select file formats for this preview service"
 }

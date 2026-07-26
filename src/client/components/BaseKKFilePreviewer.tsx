@@ -132,6 +132,7 @@ type RoleEntity = string | {
 
 type CurrentUserLike = {
   username?: string;
+  nickname?: string;
   isSuperAdmin?: boolean;
   isSystemAdmin?: boolean;
   roles?: RoleEntity[];
@@ -1013,6 +1014,9 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                   fileUrl={resolvedPreviewUrl}
                   fileName={viewerFileName}
                   watermark={watermarkText}
+                  watermarkOpacity={kkfileviewConfig.watermarkOpacity}
+                  watermarkRotate={kkfileviewConfig.watermarkRotate}
+                  watermarkColor={kkfileviewConfig.watermarkColor}
                   enableDownload={kkfileviewConfig.enableDownload !== false}
                   assetBase={serviceConfigMap.fileViewer.host}
                   fetchFile={kkfileviewConfig.fileViewerLoadMode === 'cdn' ? undefined : fetchFileWithAuth}

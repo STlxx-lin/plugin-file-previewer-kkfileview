@@ -2,9 +2,9 @@
  * @jsxRuntime classic
  * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { AppstoreOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col, Progress } from 'antd';
+import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col, Progress } from 'antd';
 import type { FormInstance } from 'antd';
 import {
   DEFAULT_EXTENSIONS,
@@ -120,6 +120,14 @@ type BasicProps = {
   enabledStateMap: Record<PreviewService, boolean>;
   visible: boolean;
   t: Translation;
+  onTestConnection?: (service: PreviewService) => void;
+  testingServices?: Record<PreviewService, boolean>;
+  validateServerUrl?: (value?: string) => boolean;
+  fileViewerDownloaded?: boolean;
+  downloadingFileViewer?: boolean;
+  onDownloadFileViewer?: () => void;
+  downloadProgress?: DownloadProgressState | null;
+  form?: FormInstance;
 };
 
 type AdvancedProps = {
@@ -304,199 +312,7 @@ const renderServiceExtensionsField = (
   </Form.Item>
 );
 
-const renderAdvancedServiceConfigCard = (
-  service: (typeof PREVIEW_SERVICE_REGISTRY)[number],
-  t: Translation,
-  validateServerUrl: (value?: string) => boolean,
-  onTestConnection: (service: PreviewService) => void,
-  testingServices: Record<PreviewService, boolean>,
-  fileViewerDownloaded?: boolean,
-  downloadingFileViewer?: boolean,
-  onDownloadFileViewer?: () => void,
-  downloadProgress?: DownloadProgressState | null,
-) => (
-  <div
-    key={`${service.key}-advanced-config-card`} // 使用服务 key 作为稳定的渲染键
-    style={{
-      background: '#fff', // 白色内容底板，突出服务卡片分组
-      border: '1px solid #f0f0f0', // 细边框提升区域边界感
-      borderRadius: 8, // 圆角保持与基础设置风格统一
-      padding: 12, // 统一卡片内部留白
-      height: '100%', // 让同一行卡片高度对齐
-    }}
-  >
-    <Typography.Text strong style={{ display: 'inline-block', marginBottom: 8 }}>
-      {t(service.title)}
-    </Typography.Text>
-    <Form.Item
-      name={service.hostField}
-      label={t(getHostLabel(service.key))}
-      style={{ marginBottom: 10 }}
-      rules={buildHostRules(service.key, t, validateServerUrl)}
-    >
-      <Input
-        placeholder={t(getHostPlaceholder(service.key))}
-        addonAfter={service.key === 'fileViewer' ? undefined : (
-          <Button
-            type="link"
-            size="small"
-            loading={testingServices[service.key]}
-            onClick={() => onTestConnection(service.key)}
-          >
-            {t('Test')}
-          </Button>
-        )}
-      />
-    </Form.Item>
-    <Form.Item
-      name={service.extensionsField}
-      label={t(getExtensionLabel(service.key))}
-      extra={t(getExtensionExtra(service.key))}
-      style={{ marginBottom: 0 }}
-      rules={buildExtensionRules(t)}
-    >
-      <Select
-        mode="tags"
-        tokenSeparators={[',', ' ', ';']}
-        placeholder={t('e.g. doc,docx,xls,xlsx,ppt,pptx,pdf')}
-        options={parseExtensionsInput(
-          service.key === 'microsoft' ? DEFAULT_MICROSOFT_EXTENSIONS : DEFAULT_EXTENSIONS,
-        ).map((item) => ({
-          label: item,
-          value: item,
-        }))}
-      />
-    </Form.Item>
-    {service.key === 'fileViewer' && (
-      <>
-        <style dangerouslySetInnerHTML={{__html: `
-          @keyframes fileViewerPulse {
-            0% { transform: scale(0.95); opacity: 0.5; }
-            50% { transform: scale(1.1); opacity: 1; }
-            100% { transform: scale(0.95); opacity: 0.5; }
-          }
-        `}} />
-        <div style={{
-          marginTop: 12,
-          padding: '12px 16px',
-          background: fileViewerDownloaded ? 'linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%)' : 'linear-gradient(135deg, #fffbe6 0%, #fff0f6 100%)',
-          border: fileViewerDownloaded ? '1px solid #b7eb8f' : '1px solid #ffe58f',
-          borderRadius: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          transition: 'all 0.3s ease',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              {fileViewerDownloaded ? (
-                <>
-                  <span style={{
-                    display: 'inline-block',
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    backgroundColor: '#52c41a',
-                    boxShadow: '0 0 8px rgba(82, 196, 26, 0.6)',
-                  }} />
-                  <span style={{ color: '#2b7811' }}>{t('Static files ready (Local Mode)')}</span>
-                </>
-              ) : (
-                <>
-                  <span style={{
-                    display: 'inline-block',
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    backgroundColor: '#faad14',
-                    boxShadow: '0 0 8px rgba(250, 173, 20, 0.6)',
-                    animation: 'fileViewerPulse 1.5s infinite',
-                  }} />
-                  <span style={{ color: '#b26b00' }}>{t('Static files missing (CDN Mode)')}</span>
-                </>
-              )}
-            </span>
-            <Button
-              type="primary"
-              size="small"
-              style={{
-                borderRadius: 6,
-                background: fileViewerDownloaded ? '#52c41a' : '#1890ff',
-                borderColor: fileViewerDownloaded ? '#52c41a' : '#1890ff',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-              }}
-              loading={downloadingFileViewer}
-              onClick={onDownloadFileViewer}
-            >
-              {fileViewerDownloaded ? t('Re-download') : t('Download Static Files')}
-            </Button>
-          </div>
-          <Typography.Text type="secondary" style={{ fontSize: 11, lineHeight: '1.4', margin: 0 }}>
-            {fileViewerDownloaded 
-              ? t('Local static files will be served first. No external internet connection is required for File Viewer.')
-              : t('Requires downloading about 170MB of static resources to run locally. If not downloaded, it will fallback to unpkg CDN.')
-            }
-          </Typography.Text>
-        </div>
 
-        {downloadProgress && (downloadingFileViewer || (downloadProgress.status && downloadProgress.status !== 'idle')) && (
-          <div style={{
-            marginTop: 10,
-            padding: '10px 14px',
-            background: '#fafafa',
-            border: '1px solid #e8e8e8',
-            borderRadius: 6,
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <Typography.Text style={{ fontSize: 12 }} type="secondary">
-                {downloadProgress.message || t('Downloading static files...')}
-              </Typography.Text>
-              {downloadProgress.speedText && downloadProgress.speedText !== '0 KB/s' && (
-                <Typography.Text style={{ fontSize: 12, color: '#1890ff' }} strong>
-                  ⚡ {downloadProgress.speedText}
-                </Typography.Text>
-              )}
-            </div>
-            <Progress
-              percent={downloadProgress.percent || 0}
-              status={downloadProgress.status === 'error' ? 'exception' : downloadProgress.percent === 100 ? 'success' : 'active'}
-              strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }}
-              size="small"
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: '#8c8c8c' }}>
-              <span>
-                {(!downloadProgress.totalText || downloadProgress.totalText === '未知' || downloadProgress.totalText === '0 B')
-                  ? `${t('Downloaded')}: ${downloadProgress.downloadedText || '0 B'}`
-                  : `${t('Downloaded')}: ${downloadProgress.downloadedText || '0 B'} / ${downloadProgress.totalText}`}
-              </span>
-            </div>
-            {downloadProgress.error && (
-              <Typography.Text type="danger" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
-                {downloadProgress.error}
-              </Typography.Text>
-            )}
-          </div>
-        )}
-
-        <div style={{ marginTop: 12, padding: '12px 16px', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-          <Typography.Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13 }}>
-            {t('File Viewer Default Load Mode')}
-          </Typography.Text>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 11, lineHeight: '1.4' }}>
-            {t('CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).')}
-          </Typography.Paragraph>
-          <Form.Item name="fileViewerLoadMode" style={{ marginBottom: 0 }}>
-            <Radio.Group buttonStyle="solid">
-              <Radio.Button value="proxy">{t('Proxy Mode (default, authenticated)')}</Radio.Button>
-              <Radio.Button value="cdn">{t('CDN Mode (direct link)')}</Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-        </div>
-      </>
-    )}
-  </div>
-);
 
 export const SettingsToolbar = ({
   activePanel,
@@ -625,59 +441,245 @@ export const BasicSettingsCard = ({
   enabledStateMap,
   t,
   visible,
-}: BasicProps) => (
-  <Card bordered={false} title={t('Basic Settings')} style={{ display: visible ? 'block' : 'none' }}>
-    <Card
-      size="small"
-      bordered={false}
-      title={t('Preview Service Switches')}
-      style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }}
-      bodyStyle={{ padding: 16 }}
-    >
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-        {t('Enable or disable each preview service')}
-      </Typography.Paragraph>
-      <Row gutter={[12, 12]}>
-        {PREVIEW_SERVICE_REGISTRY.map((service) => (
-          <Col key={`${service.key}-enabled`} xs={24} md={8}>
-            <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
-              <Typography.Text strong>{t(service.title)}</Typography.Text>
+  onTestConnection,
+  testingServices = { kkfileview: false, basemetas: false, microsoft: false, fileViewer: false },
+  fileViewerDownloaded,
+  downloadingFileViewer,
+  onDownloadFileViewer,
+  downloadProgress,
+  form,
+}: BasicProps) => {
+  const [configModalService, setConfigModalService] = useState<PreviewService | null>(null);
+
+  const activeService = PREVIEW_SERVICE_REGISTRY.find((s) => s.key === configModalService);
+
+  return (
+    <Card bordered={false} title={t('Basic Settings')} style={{ display: visible ? 'block' : 'none' }}>
+      <Card
+        size="small"
+        bordered={false}
+        title={t('Preview Service Switches')}
+        style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }}
+        bodyStyle={{ padding: 16 }}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          {t('Enable or disable each preview service')}
+        </Typography.Paragraph>
+        <Row gutter={[12, 12]}>
+          {PREVIEW_SERVICE_REGISTRY.map((service) => (
+            <Col key={`${service.key}-enabled`} xs={24} md={12}>
+              <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
+                <Space align="center">
+                  <Typography.Text strong>{t(service.title)}</Typography.Text>
+                  {service.key === 'fileViewer' && (
+                    <Tag color={fileViewerDownloaded ? 'green' : 'orange'} style={{ margin: 0 }}>
+                      {fileViewerDownloaded ? t('Static files ready (Local Mode)') : t('Static files missing (CDN Mode)')}
+                    </Tag>
+                  )}
+                </Space>
+                <Space size={4} align="center">
+                  <Tooltip title={`${t('Configure')} ${t(service.title)}`}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<SettingOutlined />}
+                      onClick={() => setConfigModalService(service.key)}
+                    />
+                  </Tooltip>
+                  <Form.Item
+                    name={service.enabledField}
+                    valuePropName="checked"
+                    noStyle
+                  >
+                    <Switch />
+                  </Form.Item>
+                </Space>
+              </div>
+            </Col>
+          ))}
+        </Row>
+        <div style={{ marginTop: 16 }}>
+          <Typography.Text strong>{t('Preferred Preview')}</Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 8, marginTop: 4, fontSize: 12 }}>
+            {t('Select the default preview engine, or disable all service previews')}
+          </Typography.Paragraph>
+          <Form.Item
+            name="preferredPreview"
+            style={{ marginBottom: 0 }}
+            labelCol={{ span: 0 }}
+            wrapperCol={{ span: 24 }}
+          >
+            <Radio.Group disabled={allServicesOff} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {PREVIEW_SERVICE_REGISTRY.map((service) => (
+                <Radio.Button
+                  key={service.key}
+                  value={service.key}
+                  disabled={enabledStateMap[service.key] !== true}
+                >
+                  {t(service.title)}
+                </Radio.Button>
+              ))}
+            </Radio.Group>
+          </Form.Item>
+        </div>
+      </Card>
+
+      {/* 服务配置专属 Modal 弹窗 */}
+      <Modal
+        title={
+          activeService ? (
+            <Space align="center" size={8}>
+              <SettingOutlined style={{ fontSize: 18, color: '#1677ff' }} />
+              <Typography.Title level={5} style={{ margin: 0 }}>
+                {`${t(activeService.title)} ${t('Settings')}`}
+              </Typography.Title>
+            </Space>
+          ) : (
+            t('Service Settings')
+          )
+        }
+        open={Boolean(configModalService)}
+        onCancel={() => setConfigModalService(null)}
+        footer={[
+          <Button type="primary" key="ok" size="middle" style={{ minWidth: 88 }} onClick={() => setConfigModalService(null)}>
+            {t('Confirm')}
+          </Button>,
+        ]}
+        width={760}
+        bodyStyle={{ padding: '20px 24px' }}
+      >
+        {activeService && (
+          <Space direction="vertical" style={{ width: '100%' }} size={20}>
+            {/* 1. 服务器主机地址与连通性测试 */}
+            <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
               <Form.Item
-                name={service.enabledField}
-                valuePropName="checked"
-                noStyle
+                name={activeService.hostField}
+                preserve={true}
+                label={<Typography.Text strong>{t('Server Address')}</Typography.Text>}
+                extra={
+                  activeService.key === 'microsoft'
+                    ? t('Microsoft preview uses browser-side access only')
+                    : t('Configure server address for this service')
+                }
+                style={{ marginBottom: 0 }}
               >
-                <Switch />
+                <Input
+                  size="large"
+                  placeholder={
+                    activeService.key === 'kkfileview'
+                      ? t('e.g., http://127.0.0.1:8012')
+                      : activeService.key === 'basemetas'
+                        ? t('e.g., https://fileview.basemetas.cn')
+                        : activeService.key === 'microsoft'
+                          ? t('e.g., https://view.officeapps.live.com/op/embed.aspx')
+                          : '/assets/file-viewer/'
+                  }
+                  addonAfter={
+                    onTestConnection ? (
+                      <Button
+                        type="link"
+                        size="small"
+                        loading={testingServices[activeService.key]}
+                        onClick={() => onTestConnection(activeService.key)}
+                      >
+                        {t('Test')}
+                      </Button>
+                    ) : null
+                  }
+                />
               </Form.Item>
             </div>
-          </Col>
-        ))}
-      </Row>
-      <div style={{ marginTop: 12 }}>
-        <Typography.Text strong>{t('Preferred Preview')}</Typography.Text>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 8, marginTop: 4, fontSize: 12 }}>
-          {t('Select the default preview engine, or disable all service previews')}
-        </Typography.Paragraph>
-        <Form.Item
-          name="preferredPreview"
-          style={{ marginBottom: 0 }}
-          labelCol={{ span: 0 }}
-          wrapperCol={{ span: 24 }}
-        >
-          <Radio.Group disabled={allServicesOff} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {PREVIEW_SERVICE_REGISTRY.map((service) => (
-              <Radio.Button
-                key={service.key}
-                value={service.key}
-                disabled={enabledStateMap[service.key] !== true}
+
+            {/* 2. BaseMetas 专属：请求类型控制 */}
+            {activeService.key === 'basemetas' && (
+              <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
+                <Form.Item
+                  name="basemetasRequestType"
+                  preserve={true}
+                  label={<Typography.Text strong>{t('BaseMetas Request Type')}</Typography.Text>}
+                  extra={t('Select how BaseMetas preview URL is generated')}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group size="middle">
+                    <Radio value="query">{t('Query Parameters')}</Radio>
+                    <Radio value="base64">{t('Base64 Encoded')}</Radio>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+            )}
+
+            {/* 3. File Viewer 专属：离线模式与加载模式 */}
+            {activeService.key === 'fileViewer' && (
+              <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
+                <Form.Item
+                  name="fileViewerLoadMode"
+                  preserve={true}
+                  label={<Typography.Text strong>{t('File Viewer Default Load Mode')}</Typography.Text>}
+                  extra={t(
+                    'CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).',
+                  )}
+                  style={{ marginBottom: 16 }}
+                >
+                  <Radio.Group size="middle">
+                    <Radio value="proxy">{t('Proxy Mode (default, authenticated)')}</Radio>
+                    <Radio value="cdn">{t('CDN Mode (direct link)')}</Radio>
+                  </Radio.Group>
+                </Form.Item>
+
+                <Card size="small" style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
+                  <Typography.Text strong>{t('Download Static Files')}</Typography.Text>
+                  <Typography.Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 12, fontSize: 12 }}>
+                    {t(
+                      'Local static files will be served first. No external internet connection is required for File Viewer.',
+                    )}
+                  </Typography.Paragraph>
+
+                  {downloadingFileViewer && downloadProgress && downloadProgress.status !== 'idle' ? (
+                    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {downloadProgress.status === 'downloading'
+                          ? `${t('Downloading...')} ${downloadProgress.downloadedText} (${downloadProgress.speedText})`
+                          : downloadProgress.status === 'extracting'
+                            ? t('Extracting static files...')
+                            : t('Processing...')}
+                      </Typography.Text>
+                      <Progress percent={downloadProgress.percent} size="small" status="active" />
+                    </Space>
+                  ) : (
+                    <Button
+                      type={fileViewerDownloaded ? 'default' : 'primary'}
+                      size="middle"
+                      loading={downloadingFileViewer}
+                      onClick={onDownloadFileViewer}
+                    >
+                      {fileViewerDownloaded ? t('Re-download') : t('Download Static Files')}
+                    </Button>
+                  )}
+                </Card>
+              </div>
+            )}
+
+            {/* 4. 文件格式矩阵配置 */}
+            <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
+              <Form.Item
+                name={activeService.extensionsField}
+                preserve={true}
+                label={<Typography.Text strong>{t('Enabled File Formats')}</Typography.Text>}
+                extra={t('Select file formats for this preview service')}
+                style={{ marginBottom: 0 }}
               >
-                {t(service.title)}
-              </Radio.Button>
-            ))}
-          </Radio.Group>
-        </Form.Item>
-      </div>
-    </Card>
+                <Select
+                  mode="tags"
+                  size="large"
+                  style={{ width: '100%' }}
+                  placeholder={t('e.g. doc,docx,xls,xlsx,ppt,pptx,pdf')}
+                  tokenSeparators={[',', ' ']}
+                />
+              </Form.Item>
+            </div>
+          </Space>
+        )}
+      </Modal>
     <Card
       size="small"
       bordered={false}
@@ -837,138 +839,106 @@ export const BasicSettingsCard = ({
       </Row>
     </Card>
   </Card>
-);
+  );
+};
 
 export const AdvancedSettingsCard = ({
-  onTestConnection,
   onWatermarkChange,
   onWatermarkTypeChange,
   t,
-  testingServices,
-  validateServerUrl,
   visible,
   watermark,
   watermarkType,
-  fileViewerDownloaded,
-  downloadingFileViewer,
-  onDownloadFileViewer,
-  downloadProgress,
 }: AdvancedProps) => {
   // 将外部传入的水印类型归一化为预期枚举，避免异常值导致文案和状态错乱。
   const resolvedWatermarkType = watermarkType === 'global' ? 'global' : 'preview';
 
   return (
-  <Card
-    bordered={false} // 高级设置外层卡片容器，去掉默认边框
-    title={t('Advanced Settings')} // 使用与基础设置一致的标题样式
-    style={{ marginTop: 16, display: visible ? 'block' : 'none' }} // 仅在当前面板激活时展示
-  >
     <Card
-      size="small" // 使用小卡片尺寸，与基础设置保持一致
-      bordered={false} // 内层卡片不显示边框
-      title={t('NocoBase Server Address')} // NocoBase 服务器地址配置分组标题
-      style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }} // 浅灰背景和细边框，与基础设置卡片风格统一
-      bodyStyle={{ padding: 16 }} // 内边距与基础设置一致
+      bordered={false} // 高级设置外层卡片容器，去掉默认边框
+      title={t('Advanced Settings')} // 使用与基础设置一致的标题样式
+      style={{ marginTop: 16, display: visible ? 'block' : 'none' }} // 仅在当前面板激活时展示
     >
-      <Typography.Paragraph
-        type="secondary" // 使用次要说明文本样式
-        style={{ marginBottom: 12 }} // 与下方表单项保持间距
+      <Card
+        size="small" // 使用小卡片尺寸，与基础设置保持一致
+        bordered={false} // 内层卡片不显示边框
+        title={t('NocoBase Server Address')} // NocoBase 服务器地址配置分组标题
+        style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }} // 浅灰背景和细边框，与基础设置卡片风格统一
+        bodyStyle={{ padding: 16 }} // 内边距与基础设置一致
       >
-        {t('Used to complete the full URL if the file attachment path is a relative path (e.g., /storage/uploads/...). If not provided, the current site runtime public path will be used automatically.')} {/* 未填写时改为说明会自动继承站点运行时公共路径 */}
-      </Typography.Paragraph>
-      <Form.Item
-        name="nocobaseHost" // 绑定 NocoBase 服务器地址字段
-        labelCol={{ span: 0 }} // 不展示左侧标签列，视觉上只保留卡片标题
-        wrapperCol={{ span: 24 }} // 输入框占满整行
-        style={{ marginBottom: 0 }} // 与描述文案紧凑排布
-      >
-        <Input placeholder={t('e.g. https://app.nocobase.com')} /> {/* NocoBase 服务器地址示例占位符 */}
-      </Form.Item>
-    </Card>
+        <Typography.Paragraph
+          type="secondary" // 使用次要说明文本样式
+          style={{ marginBottom: 12 }} // 与下方表单项保持间距
+        >
+          {t('Used to complete the full URL if the file attachment path is a relative path (e.g., /storage/uploads/...). If not provided, the current site runtime public path will be used automatically.')}
+        </Typography.Paragraph>
+        <Form.Item
+          name="nocobaseHost" // 绑定 NocoBase 服务器地址字段
+          labelCol={{ span: 0 }} // 不展示左侧标签列，视觉上只保留卡片标题
+          wrapperCol={{ span: 24 }} // 输入框占满整行
+          style={{ marginBottom: 0 }} // 与描述文案紧凑排布
+        >
+          <Input placeholder={t('e.g. https://app.nocobase.com')} />
+        </Form.Item>
+      </Card>
 
-    <Card
-      size="small" // 预览服务连接配置小卡片
-      bordered={false} // 不显示外边框
-      title={t('Service Connection Settings')} // 使用原有“服务连接设置”文案作为分组标题
-      style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }} // 与基础设置中卡片统一的浅灰背景和细边框
-      bodyStyle={{ padding: 16 }} // 统一的内边距
-    >
-      <Typography.Paragraph
-        type="secondary" // 次要说明文本样式
-        style={{ marginBottom: 12 }} // 底部留出空间给表单项
+      <Card
+        size="small" // 水印相关配置小卡片
+        bordered={false} // 不显示外边框
+        title={t('Watermark Type')} // 使用水印类型作为整体分组标题
+        style={{ marginBottom: 0, background: '#fafafa', border: '1px solid #f0f0f0' }} // 与其它小卡片统一浅灰背景和边框
+        bodyStyle={{ padding: 16 }} // 统一内边距
       >
-        {t('Configure server address and supported formats for each service')} {/* 复用原有服务连接说明文案 */}
-      </Typography.Paragraph>
-      <Row gutter={[12, 12]}> {/* 使用栅格布局让每个服务独立成卡，减少信息拥挤 */}
-        {PREVIEW_SERVICE_REGISTRY.map((service) => (
-          <Col key={`${service.key}-advanced`} xs={24} md={24} xl={8}>
-            {renderAdvancedServiceConfigCard(
-              service,
-              t,
-              validateServerUrl,
-              onTestConnection,
-              testingServices,
-              fileViewerDownloaded,
-              downloadingFileViewer,
-              onDownloadFileViewer,
-              downloadProgress,
-            )}
+        <Form.Item name="watermarkType" style={{ marginBottom: 12 }}>
+          <Radio.Group onChange={(event) => onWatermarkTypeChange(event.target.value === 'global' ? 'global' : 'preview')}>
+            <Radio.Button value="global">{t('Global Watermark')}</Radio.Button>
+            <Radio.Button value="preview">{t('Preview Watermark')}</Radio.Button>
+          </Radio.Group>
+        </Form.Item>
+        <Form.Item
+          name="watermark"
+          labelCol={{ span: 0 }}
+          wrapperCol={{ span: 24 }}
+          label={resolvedWatermarkType === 'global' ? t('Global Watermark') : t('Preview Watermark')}
+          extra={`${t('Set a text watermark for the previewed file (optional)')} ${t('Supported variables: {{user.username}}, {{user.nickname}}, {{user.department}}, {{request.time}}')}`}
+          style={{ marginBottom: 16 }}
+        >
+          <Input onChange={(event) => onWatermarkChange(event.target.value)} placeholder={t('e.g. {{user.department}} {{request.time}}')} />
+        </Form.Item>
+        <Row gutter={16}>
+          <Col span={8}>
+            <Form.Item
+              name="watermarkOpacity"
+              label={t('Watermark Opacity')}
+              extra={t('Range: 0.01 - 1.0 (default 0.18)')}
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={0.01} max={1} step={0.01} precision={2} style={{ width: '100%' }} placeholder="0.18" />
+            </Form.Item>
           </Col>
-        ))}
-      </Row>
+          <Col span={8}>
+            <Form.Item
+              name="watermarkRotate"
+              label={t('Watermark Angle')}
+              extra={t('Range: -180 to 180 (default -24)')}
+              style={{ marginBottom: 0 }}
+            >
+              <InputNumber min={-180} max={180} step={1} style={{ width: '100%' }} placeholder="-24" addonAfter="°" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              name="watermarkColor"
+              label={t('Watermark Color')}
+              extra={t('e.g. rgba(0,0,0,0.18) or #1f7a58')}
+              style={{ marginBottom: 0 }}
+            >
+              <Input placeholder="rgba(0, 0, 0, 0.18)" />
+            </Form.Item>
+          </Col>
+        </Row>
+      </Card>
     </Card>
-
-    <Card
-      size="small" // BaseMetas 请求类型配置小卡片
-      bordered={false} // 不显示外边框
-      title={t('BaseMetas Request Type')} // 使用 BaseMetas 请求类型作为分组标题
-      style={{ marginBottom: 16, background: '#fafafa', border: '1px solid #f0f0f0' }} // 与其它小卡片统一的浅灰背景和边框
-      bodyStyle={{ padding: 16 }} // 内边距与基础设置保持一致
-    >
-      <Typography.Paragraph
-        type="secondary" // 说明文案采用次要文本样式
-        style={{ marginBottom: 12 }} // 与下方单选按钮组保持合适间距
-      >
-        {t('Select how BaseMetas preview URL is generated')} {/* 复用原有 BaseMetas 请求类型说明 */}
-      </Typography.Paragraph>
-      <Form.Item
-        name="basemetasRequestType" // 绑定 BaseMetas 请求类型字段
-        labelCol={{ span: 0 }} // 不显示标签列，只使用分组标题
-        wrapperCol={{ span: 24 }} // 单选按钮组占满整行
-        style={{ marginBottom: 0 }} // 紧凑布局
-      >
-        <Radio.Group> {/* BaseMetas 请求参数编码方式选择 */}
-          <Radio.Button value="query">{t('Query Parameters')}</Radio.Button> {/* 使用 Query 参数模式 */}
-          <Radio.Button value="base64">{t('Base64 Encoded')}</Radio.Button> {/* 使用 Base64 编码模式 */}
-        </Radio.Group>
-      </Form.Item>
-    </Card>
-
-    <Card
-      size="small" // 水印相关配置小卡片
-      bordered={false} // 不显示外边框
-      title={t('Watermark Type')} // 使用水印类型作为整体分组标题
-      style={{ marginBottom: 0, background: '#fafafa', border: '1px solid #f0f0f0' }} // 与其它小卡片统一浅灰背景和边框
-      bodyStyle={{ padding: 16 }} // 统一内边距
-    >
-      <Form.Item name="watermarkType" style={{ marginBottom: 12 }}>
-        <Radio.Group onChange={(event) => onWatermarkTypeChange(event.target.value === 'global' ? 'global' : 'preview')}>
-          <Radio.Button value="global">{t('Global Watermark')}</Radio.Button>
-          <Radio.Button value="preview">{t('Preview Watermark')}</Radio.Button>
-        </Radio.Group>
-      </Form.Item>
-      <Form.Item
-        name="watermark"
-        labelCol={{ span: 0 }}
-        wrapperCol={{ span: 24 }}
-        label={resolvedWatermarkType === 'global' ? t('Global Watermark') : t('Preview Watermark')}
-        extra={`${t('Set a text watermark for the previewed file (optional)')} ${t('Supported variables: {{user.username}}, {{user.nickname}}, {{user.department}}, {{request.time}}')}`}
-        style={{ marginBottom: 0 }}
-      >
-        <Input onChange={(event) => onWatermarkChange(event.target.value)} placeholder={t('e.g. {{user.department}} {{request.time}}')} />
-      </Form.Item>
-    </Card>
-  </Card>
   );
 };
 

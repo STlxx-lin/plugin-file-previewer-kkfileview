@@ -248,6 +248,15 @@ export function normalizeSettingsSaveValues(
       : 'user',
     watermarkType: watermarkType === 'global' ? 'global' : 'preview',
     watermark: String(values.watermark ?? fallback.watermark ?? '').trim(),
+    watermarkOpacity:
+      typeof values.watermarkOpacity === 'number' && !isNaN(values.watermarkOpacity)
+        ? Math.max(0.01, Math.min(1, values.watermarkOpacity))
+        : (typeof fallback.watermarkOpacity === 'number' ? fallback.watermarkOpacity : 0.18),
+    watermarkRotate:
+      typeof values.watermarkRotate === 'number' && !isNaN(values.watermarkRotate)
+        ? Math.max(-180, Math.min(180, Math.round(values.watermarkRotate)))
+        : (typeof fallback.watermarkRotate === 'number' ? fallback.watermarkRotate : -24),
+    watermarkColor: String(values.watermarkColor ?? fallback.watermarkColor ?? 'rgba(0, 0, 0, 0.18)').trim(),
     fileViewerAssetBase: normalizeFileViewerAssetBase(
       values.fileViewerAssetBase,
       fallback.fileViewerAssetBase,
@@ -1641,7 +1650,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.app.resourceManager.define({
       name: 'kkfileviewSettings',
       actions: {
-        list: async (ctx: ActionContext) => {
+        list: async (ctx: ActionContext, next: () => Promise<void>) => {
           const repo = ctx.db.getRepository('kkfileviewSettings');
           const rows = await repo.find({ sort: ['createdAt'] });
           const list = Array.isArray(rows) ? rows : [];
@@ -1659,7 +1668,33 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           ctx.body = {
             data: result,
           };
-        }
+        },
+        update: async (ctx: ActionContext, next: () => Promise<void>) => {
+          await next();
+          const fs = require('fs-extra');
+          const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
+          const isDownloaded = await fs.pathExists(filePath);
+          if (ctx.body && ctx.body.data) {
+            if (Array.isArray(ctx.body.data)) {
+              ctx.body.data = ctx.body.data.map((item: any) => ({ ...item, fileViewerDownloaded: isDownloaded }));
+            } else if (typeof ctx.body.data === 'object') {
+              ctx.body.data.fileViewerDownloaded = isDownloaded;
+            }
+          }
+        },
+        create: async (ctx: ActionContext, next: () => Promise<void>) => {
+          await next();
+          const fs = require('fs-extra');
+          const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
+          const isDownloaded = await fs.pathExists(filePath);
+          if (ctx.body && ctx.body.data) {
+            if (Array.isArray(ctx.body.data)) {
+              ctx.body.data = ctx.body.data.map((item: any) => ({ ...item, fileViewerDownloaded: isDownloaded }));
+            } else if (typeof ctx.body.data === 'object') {
+              ctx.body.data.fileViewerDownloaded = isDownloaded;
+            }
+          }
+        },
       }
     });
   }

@@ -30,6 +30,14 @@ export type FileViewerRendererProps = { // 导出 File Viewer 渲染组件属性
   fileName: string; // 声明文件名属性。
   /** 可选：水印文本内容，由 options.watermark 原生渲染。 */
   watermark?: string; // 声明可选的水印文本属性。
+  /** 可选：水印透明度 (0.01 - 1.0) */
+  watermarkOpacity?: number;
+  /** 可选：水印旋转角度 (-180 - 180) */
+  watermarkRotate?: number;
+  /** 可选：水印颜色 */
+  watermarkColor?: string;
+  /** 可选：样式隔离策略 ('scoped' | 'shadow' | 'none' | 'auto')。默认为 'scoped' 以保证打印与完整渲染。 */
+  styleIsolation?: 'scoped' | 'shadow' | 'none' | 'auto';
   /** 可选：控制工具栏下载按钮。 */
   enableDownload?: boolean;
   /** 可选：工具栏定位策略 ('auto' | 'top' | 'top-center' | 'bottom-right')。 */
@@ -104,7 +112,7 @@ function loadScriptWithProgress(src: string, onProgress?: (percent: number) => v
 }
 
 export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 File Viewer 渲染组件。
-  const { assetBase, fileUrl, fileName, watermark, enableDownload, toolbarPosition, fetchFile, fileViewerDownloaded, onReady, onError, onProgress } = props; // 解构组件所需的核心属性与回调。
+  const { assetBase, fileUrl, fileName, watermark, watermarkOpacity, watermarkRotate, watermarkColor, styleIsolation, enableDownload, toolbarPosition, fetchFile, fileViewerDownloaded, onReady, onError, onProgress } = props; // 解构组件所需的核心属性与回调。
   const hostRef = useRef<HTMLDivElement>(null); // 创建宿主容器引用以供挂载 Viewer。
 
   const fetchFileRef = useRef(fetchFile);
@@ -173,24 +181,26 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
 
         const normalizedWatermark = watermark ? String(watermark).trim() : '';
 
-        // 遵循官方规范构建 options 配置：options.watermark 支持文字/图片水印，options.toolbar 控制下载/打印/位置等
+        // 遵循官方规范构建 options 配置：options.watermark 支持文字/图片水印，options.printMask 支持掩膜打印，options.toolbar 控制下载/打印/掩膜/位置等
         const viewerOptions: Record<string, any> = {
-          styleIsolation: 'shadow', // 使用 Shadow DOM 隔离后台全局样式干扰
+          styleIsolation: styleIsolation || 'auto', // 默认使用 auto 智能隔离
+          printMask: true, // 显式开启掩膜打印功能（支持拖拽绘制黑色遮盖块）
+          print: true, // 显式开启打印响应
+          toolbar: {
+            show: true,
+            visible: true,
+            download: enableDownload !== false,
+            print: true,
+            printMask: true, // 工具栏显示掩膜打印按钮
+          },
         };
 
         if (normalizedWatermark) {
           viewerOptions.watermark = {
             text: normalizedWatermark,
-            opacity: 0.18,
-            color: 'rgba(0, 0, 0, 0.18)',
-            rotate: -24,
-          };
-        }
-
-        if (enableDownload === false || toolbarPosition) {
-          viewerOptions.toolbar = {
-            ...(enableDownload === false ? { download: false } : {}),
-            ...(toolbarPosition ? { position: toolbarPosition } : {}),
+            opacity: typeof watermarkOpacity === 'number' ? watermarkOpacity : 0.18,
+            color: watermarkColor || 'rgba(0, 0, 0, 0.18)',
+            rotate: typeof watermarkRotate === 'number' ? watermarkRotate : -24,
           };
         }
 
@@ -200,6 +210,12 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
           filename: fileName, // 兼容 filename 别名
           watermark: normalizedWatermark, // 官方可用参数/JS Property: watermark
           options: viewerOptions, // 官方可用参数：options (包含 watermark、styleIsolation、toolbar 等)
+          // 顶层透传，兼容底层组件直接从 props/attributes 寻址的链路
+          print: true,
+          printMask: true,
+          download: enableDownload !== false,
+          toolbar: enableDownload === false ? { show: true, visible: true, download: false, print: true, printMask: true } : true,
+          styleIsolation: styleIsolation || 'auto',
           onEvent: (event: any) => { // 官方可用参数：onEvent 状态与生命周期监听
             if (event?.type === 'ready' || event?.type === 'loaded') {
               onReadyRef.current?.();
@@ -245,5 +261,14 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
     }; // 结束 effect 清理逻辑定义。
   }, [assetBase, fileUrl, fileName, watermark, enableDownload, toolbarPosition, fileViewerDownloaded]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
 
-  return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />;
+  return (
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        .fv-print-mask-toolbar {
+          z-index: 99999 !important;
+        }
+      ` }} />
+      <div ref={hostRef} style={{ width: '100%', height: '100%' }} />
+    </div>
+  );
 } // 结束 File Viewer 渲染组件定义。

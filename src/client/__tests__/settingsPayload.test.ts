@@ -2,24 +2,33 @@ import { describe, expect, it } from 'vitest'; // 引入 Vitest 断言工具。
 import { buildFileViewerFormState, buildFileViewerSaveState, buildWatermarkSaveState } from '../settingsPayload'; // 引入设置保存载荷构建函数。
 
 describe('settingsPayload', () => { // 定义设置载荷测试分组。
-  it('应该优先保存受控草稿中的水印文本', () => { // 验证水印文本优先使用草稿值。
+  it('应该优先保存受控草稿中的水印文本与样式配置', () => { // 验证水印文本及样式参数解析。
     const result = buildWatermarkSaveState( // 构建水印保存载荷。
       {
         watermark: ' NEW_WATERMARK ', // 提供带空格的新水印文本。
         watermarkType: 'global', // 提供新的水印类型。
+        watermarkOpacity: 0.3,
+        watermarkRotate: -45,
+        watermarkColor: '#ff0000',
       },
       {
         watermark: 'OLD_WATERMARK', // 提供旧水印文本作为回退值。
         watermarkType: 'preview', // 提供旧水印类型作为回退值。
+        watermarkOpacity: 0.18,
+        watermarkRotate: -24,
+        watermarkColor: 'rgba(0, 0, 0, 0.18)',
       },
     );
     expect(result).toEqual({ // 断言结果使用草稿中的新值。
       watermark: 'NEW_WATERMARK', // 断言水印文本被去除首尾空格。
       watermarkType: 'global', // 断言水印类型保留为合法草稿值。
+      watermarkOpacity: 0.3,
+      watermarkRotate: -45,
+      watermarkColor: '#ff0000',
     });
   });
 
-  it('应该在草稿类型异常时回退到可用的表单类型', () => { // 验证水印类型回退逻辑。
+  it('应该在草稿类型或数值异常时回退到默认样式值', () => { // 验证水印样式回退逻辑。
     const result = buildWatermarkSaveState( // 构建水印保存载荷。
       {
         watermark: '', // 提供空字符串水印文本。
@@ -30,9 +39,12 @@ describe('settingsPayload', () => { // 定义设置载荷测试分组。
         watermarkType: 'global', // 提供旧水印类型作为回退值。
       },
     );
-    expect(result).toEqual({ // 断言结果保持当前合法草稿类型。
+    expect(result).toEqual({ // 断言结果保持默认样式值。
       watermark: '', // 断言空文本会被原样保留。
       watermarkType: 'preview', // 断言合法草稿类型不会被旧值覆盖。
+      watermarkOpacity: 0.18,
+      watermarkRotate: -24,
+      watermarkColor: 'rgba(0, 0, 0, 0.18)',
     });
   });
 

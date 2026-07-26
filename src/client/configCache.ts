@@ -50,6 +50,9 @@ export type KkfileviewConfigRecord = Partial<{
     basemetasRequestType: BasemetasRequestType | string;
     watermarkType: string;
     watermark: string;
+    watermarkOpacity: number;
+    watermarkRotate: number;
+    watermarkColor: string;
     enableKkfileview: boolean;
     enableBasemetas: boolean;
     enableMicrosoft: boolean;
@@ -224,6 +227,9 @@ export function updateConfigCache(record?: KkfileviewConfigRecord | null) {
     kkfileviewConfig.basemetasRequestType = record.basemetasRequestType === 'base64' ? 'base64' : 'query';
     kkfileviewConfig.watermarkType = record.watermarkType || 'preview';
     kkfileviewConfig.watermark = record.watermark || '';
+    kkfileviewConfig.watermarkOpacity = typeof record.watermarkOpacity === 'number' ? record.watermarkOpacity : 0.18;
+    kkfileviewConfig.watermarkRotate = typeof record.watermarkRotate === 'number' ? record.watermarkRotate : -24;
+    kkfileviewConfig.watermarkColor = record.watermarkColor || 'rgba(0, 0, 0, 0.18)';
     kkfileviewConfig.enableKkfileview = record.enableKkfileview ?? true;
     kkfileviewConfig.enableBasemetas = record.enableBasemetas ?? false;
     kkfileviewConfig.enableMicrosoft = record.enableMicrosoft ?? true;

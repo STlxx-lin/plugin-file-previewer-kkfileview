@@ -175,5 +175,15 @@
   "File Viewer Default Load Mode": "File Viewer 默认加载模式",
   "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN 模式：直接使用公开 URL 加载文件（适合公开 CDN 直链）。代理模式：通过 NocoBase 携带认证 Token 代理加载（适合内部存储）。",
   "Proxy Mode (default, authenticated)": "代理模式（默认，携带认证）",
-  "CDN Mode (direct link)": "CDN 模式（直链）"
+  "CDN Mode (direct link)": "CDN 模式（直链）",
+  "Watermark Opacity": "水印透明度",
+  "Watermark Angle": "水印旋转角度",
+  "Watermark Color": "水印文字颜色",
+  "Range: 0.01 - 1.0 (default 0.18)": "范围：0.01 - 1.0（默认 0.18）",
+  "Range: -180 to 180 (default -24)": "范围：-180 到 180 度（默认 -24）",
+  "e.g. rgba(0,0,0,0.18) or #1f7a58": "例如：rgba(0,0,0,0.18) 或 #1f7a58",
+  "Configure": "配置",
+  "Service Settings": "服务设置",
+  "Configure server address for this service": "配置该预览服务的服务器主机地址",
+  "Select file formats for this preview service": "配置由该服务处理的文件格式矩阵"
 }

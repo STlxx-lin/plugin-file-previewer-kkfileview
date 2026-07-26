@@ -4,6 +4,9 @@ import { parseExtensions, parseExtensionsInput } from './previewUtils'; // 引�
 export type WatermarkDraftState = {
   watermark: string;
   watermarkType: 'global' | 'preview';
+  watermarkOpacity?: number;
+  watermarkRotate?: number;
+  watermarkColor?: string;
 };
 
 export type FileViewerDraftState = {
@@ -39,10 +42,26 @@ export function buildWatermarkSaveState(
     normalizeWatermarkType(draft.watermarkType) ??
     normalizeWatermarkType(fallback?.watermarkType) ??
     'preview';
+
+  const nextOpacity =
+    typeof draft.watermarkOpacity === 'number' && !isNaN(draft.watermarkOpacity)
+      ? Math.max(0.01, Math.min(1, draft.watermarkOpacity))
+      : (typeof fallback?.watermarkOpacity === 'number' ? fallback.watermarkOpacity : 0.18);
+
+  const nextRotate =
+    typeof draft.watermarkRotate === 'number' && !isNaN(draft.watermarkRotate)
+      ? Math.max(-180, Math.min(180, Math.round(draft.watermarkRotate)))
+      : (typeof fallback?.watermarkRotate === 'number' ? fallback.watermarkRotate : -24);
+
+  const nextColor = String(draft.watermarkColor ?? fallback?.watermarkColor ?? 'rgba(0, 0, 0, 0.18)').trim();
+
   // 返回稳定的保存结果，供设置页和测试统一复用。
   return {
     watermark: nextWatermark,
     watermarkType: nextWatermarkType,
+    watermarkOpacity: nextOpacity,
+    watermarkRotate: nextRotate,
+    watermarkColor: nextColor,
   };
 }
 

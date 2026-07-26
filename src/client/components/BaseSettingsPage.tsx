@@ -2,7 +2,7 @@
  * @jsxRuntime classic
  * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Form, message } from 'antd';
 import { ClientAdapters } from './adapter';
 import {
@@ -62,6 +62,9 @@ type KkfileviewSettingsRecord = {
     copyEmbedHtmlRoles?: string | string[];
     watermarkType?: string;
     watermark?: string;
+    watermarkOpacity?: number;
+    watermarkRotate?: number;
+    watermarkColor?: string;
     fileViewerDownloaded?: boolean;
     fileViewerLoadMode?: 'cdn' | 'proxy';
 };
@@ -91,6 +94,9 @@ type SettingsFormValues = {
     copyEmbedHtmlRoles: string[] | string;
     watermarkType: string;
     watermark: string;
+    watermarkOpacity: number;
+    watermarkRotate: number;
+    watermarkColor: string;
     fileViewerLoadMode: 'cdn' | 'proxy';
 };
 
@@ -404,36 +410,27 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
         [serviceState.enableKkfileview, serviceState.enableBasemetas, serviceState.enableMicrosoft, serviceState.enableFileViewer]
     );
 
-    useEffect(() => {
-        let active = true;
-        const loadSettings = async () => {
-            setLoading(true);
-            try {
-                const response = await api.request({
-                    url: 'kkfileviewSettings:list',
-                    skipNotify: true,
-                });
-                if (active) {
-                    setSettingsRecords(extractSettingsRecords(response));
-                }
-            } catch (error: unknown) {
-                if (!isPermissionDeniedError(error)) {
-                    console.error(error);
-                }
-                if (active) {
-                    setSettingsRecords([]);
-                }
-            } finally {
-                if (active) {
-                    setLoading(false);
-                }
+    const fetchSettingsData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const response = await api.request({
+                url: 'kkfileviewSettings:list',
+                skipNotify: true,
+            });
+            setSettingsRecords(extractSettingsRecords(response));
+        } catch (error: unknown) {
+            if (!isPermissionDeniedError(error)) {
+                console.error(error);
             }
-        };
-        void loadSettings();
-        return () => {
-            active = false;
-        };
+            setSettingsRecords([]);
+        } finally {
+            setLoading(false);
+        }
     }, [api]);
+
+    useEffect(() => {
+        void fetchSettingsData();
+    }, [fetchSettingsData]);
 
     const currentRecord = settingsRecords[0];
 
@@ -929,7 +926,11 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
 
     const handleSave = async () => {
         try {
-            const values = (await form.validateFields()) as SettingsFormValues;
+            await form.validateFields();
+            const values = {
+                ...(currentRecord || {}),
+                ...(form.getFieldsValue(true) || {}),
+            } as SettingsFormValues;
             const parsedFields = PREVIEW_SERVICE_REGISTRY.reduce((acc, service) => {
                 const extensionFallback = service.key === 'microsoft'
                     ? DEFAULT_MICROSOFT_EXTENSIONS
@@ -938,7 +939,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                         : DEFAULT_EXTENSIONS;
 
                 acc[service.extensionsField] = parseExtensions(
-                    values[service.extensionsField],
+                    values[service.extensionsField] ?? currentRecord?.[service.extensionsField],
                     extensionFallback
                 );
                 return acc;
@@ -953,16 +954,19 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 {
                     watermark: (values.watermark !== undefined ? values.watermark : watermarkDraft) || '',
                     watermarkType: (values.watermarkType as 'global' | 'preview') || watermarkTypeDraft || 'preview',
+                    watermarkOpacity: values.watermarkOpacity,
+                    watermarkRotate: values.watermarkRotate,
+                    watermarkColor: values.watermarkColor,
                 },
-                { watermarkType: 'preview', watermark: '' }
+                { watermarkType: 'preview', watermark: '', watermarkOpacity: 0.18, watermarkRotate: -24, watermarkColor: 'rgba(0, 0, 0, 0.18)' }
             );
 
             const payload: Record<string, unknown> = {
-                kkfileviewHost: values.kkfileviewHost.trim() || DEFAULT_KKFILEVIEW_HOST,
-                basemetasHost: values.basemetasHost.trim() || DEFAULT_BASEMETAS_HOST,
-                microsoftHost: values.microsoftHost.trim() || DEFAULT_MICROSOFT_HOST,
+                kkfileviewHost: String(values.kkfileviewHost ?? currentRecord?.kkfileviewHost ?? '').trim() || DEFAULT_KKFILEVIEW_HOST,
+                basemetasHost: String(values.basemetasHost ?? currentRecord?.basemetasHost ?? '').trim() || DEFAULT_BASEMETAS_HOST,
+                microsoftHost: String(values.microsoftHost ?? currentRecord?.microsoftHost ?? '').trim() || DEFAULT_MICROSOFT_HOST,
                 fileViewerAssetBase: fileViewerSaveState.fileViewerAssetBase,
-                nocobaseHost: values.nocobaseHost.trim(),
+                nocobaseHost: String(values.nocobaseHost ?? currentRecord?.nocobaseHost ?? '').trim(),
                 kkfileviewExtensions: parsedFields.kkfileviewExtensions,
                 basemetasExtensions: parsedFields.basemetasExtensions,
                 microsoftExtensions: parsedFields.microsoftExtensions,
@@ -982,6 +986,9 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 copyEmbedHtmlRoles: normalizeRoleNames(values.copyEmbedHtmlRoles),
                 watermarkType: watermarkSaveState.watermarkType,
                 watermark: watermarkSaveState.watermark,
+                watermarkOpacity: watermarkSaveState.watermarkOpacity,
+                watermarkRotate: watermarkSaveState.watermarkRotate,
+                watermarkColor: watermarkSaveState.watermarkColor,
                 fileViewerLoadMode: values.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy',
             };
 
@@ -1015,9 +1022,14 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 savedRecord = records[0];
             }
 
-            const activeRecord = savedRecord || { ...currentRecord, ...payload };
+            const isDownloaded = Boolean(savedRecord?.fileViewerDownloaded ?? currentRecord?.fileViewerDownloaded);
+            const activeRecord: KkfileviewSettingsRecord = {
+                ...(savedRecord || { ...currentRecord, ...payload }),
+                fileViewerDownloaded: isDownloaded,
+            };
             setSettingsRecords([activeRecord]);
             updateConfigCache(activeRecord);
+            void fetchSettingsData();
 
             void api.request({
                 url: 'kkfileviewModificationRecords:append',
@@ -1072,6 +1084,13 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                     visible={activePanel === 'basic'}
                     allServicesOff={allServicesOff}
                     enabledStateMap={enabledStateMap}
+                    onTestConnection={handleTestServiceConnectivity}
+                    testingServices={testingServices}
+                    fileViewerDownloaded={currentRecord?.fileViewerDownloaded}
+                    downloadingFileViewer={downloadingFileViewer}
+                    onDownloadFileViewer={handleDownloadFileViewer}
+                    downloadProgress={downloadProgress}
+                    form={form}
                 />
 
                 <AdvancedSettingsCard
@@ -1087,13 +1106,6 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                         setWatermarkTypeDraft(val);
                         form.setFieldValue('watermarkType', val);
                     }}
-                    onTestConnection={handleTestServiceConnectivity}
-                    testingServices={testingServices}
-                    validateServerUrl={validateServerUrl}
-                    fileViewerDownloaded={currentRecord?.fileViewerDownloaded}
-                    downloadingFileViewer={downloadingFileViewer}
-                    onDownloadFileViewer={handleDownloadFileViewer}
-                    downloadProgress={downloadProgress}
                 />
             </Form>
 

@@ -150,6 +150,21 @@ export default defineCollection({
             defaultValue: '',
         },
         {
+            type: 'float',
+            name: 'watermarkOpacity',
+            defaultValue: 0.18,
+        },
+        {
+            type: 'integer',
+            name: 'watermarkRotate',
+            defaultValue: -24,
+        },
+        {
+            type: 'string',
+            name: 'watermarkColor',
+            defaultValue: 'rgba(0, 0, 0, 0.18)',
+        },
+        {
             type: 'string',
             name: 'serviceType',       // 旧版本兼容字段
             defaultValue: 'kkfileview',
