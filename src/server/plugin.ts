@@ -55,7 +55,6 @@ type KkfileviewSettingsRecord = HealthCheckSettings & {
   enableBasemetas?: boolean;
   enableMicrosoft?: boolean;
   enableFileViewer?: boolean;
-  enablePrint?: boolean;
   enableOpenInNewWindow?: boolean;
   enableFullscreenButton?: boolean;
   enableMobileAutoFullscreen?: boolean;
@@ -66,6 +65,7 @@ type KkfileviewSettingsRecord = HealthCheckSettings & {
   copyEmbedHtmlRoles?: string;
   serviceType?: string;
   preferredPreview?: string;
+  fileViewerLoadMode?: 'cdn' | 'proxy';
 };
 
 type DestroyCapableRepository = {
@@ -253,6 +253,8 @@ export function normalizeSettingsSaveValues(
       fallback.fileViewerAssetBase,
     ),
     fileViewerExtensions: JSON.stringify(fileViewerExtensions),
+    fileViewerLoadMode:
+      (values.fileViewerLoadMode ?? fallback.fileViewerLoadMode) === 'cdn' ? 'cdn' : 'proxy',
     enableFileViewer:
       values.enableFileViewer === true ||
       (values.enableFileViewer !== false && fileViewerExtensions.length > 0),
@@ -971,7 +973,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             }).trim();
             // 仅当水印类型为预览水印时，才向 kkFileView 传递预览水印参数。
             const normalizedWatermarkType = String(settings.watermarkType || 'preview').trim().toLowerCase();
-            if (normalizedWatermarkType === 'preview' && resolvedWatermark) {
+            if ((normalizedWatermarkType === 'preview' || normalizedWatermarkType === 'global') && resolvedWatermark) {
               previewUrl += `&watermarkTxt=${encodeURIComponent(resolvedWatermark)}`;
             }
 
@@ -1232,7 +1234,6 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
           fileViewerExtensions: JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
           enableFileViewer: true,
-          enablePrint: false,
           enableOpenInNewWindow: true,
           enableFullscreenButton: true,
           enableMobileAutoFullscreen: false,
@@ -1291,7 +1292,6 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       enableBasemetas: first.enableBasemetas ?? serviceType === 'basemetas',
       enableMicrosoft: first.enableMicrosoft ?? first.preferKkfileview === false,
       enableFileViewer: normalizedSaveValues.enableFileViewer !== false,
-      enablePrint: first.enablePrint === true,
       enableOpenInNewWindow: first.enableOpenInNewWindow ?? true,
       enableFullscreenButton: first.enableFullscreenButton ?? true,
       enableMobileAutoFullscreen: first.enableMobileAutoFullscreen ?? false,

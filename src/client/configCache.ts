@@ -42,12 +42,11 @@ export type KkfileviewConfigRecord = Partial<{
     basemetasExtensions: string[] | string;
     microsoftExtensions: string[] | string;
     fileViewerExtensions: string[] | string; // 声明 File Viewer 扩展名字段。
-    enablePrint: boolean;
     enableOpenInNewWindow: boolean;
     enableFullscreenButton: boolean;
     enableMobileAutoFullscreen: boolean;
     enableDownload: boolean;
-    enableFileViewerCdnToggle: boolean;
+    fileViewerLoadMode: 'cdn' | 'proxy';
     basemetasRequestType: BasemetasRequestType | string;
     watermarkType: string;
     watermark: string;
@@ -109,12 +108,11 @@ interface KkfileviewConfig {
     basemetasExtensions: string[];
     microsoftExtensions: string[];
     fileViewerExtensions: string[]; // 声明缓存中的 File Viewer 扩展名字段。
-    enablePrint: boolean;
     enableOpenInNewWindow: boolean;
     enableFullscreenButton: boolean;
     enableMobileAutoFullscreen: boolean;
     enableDownload: boolean;
-    enableFileViewerCdnToggle: boolean;
+    fileViewerLoadMode: 'cdn' | 'proxy';
     basemetasRequestType: BasemetasRequestType;
     watermarkType: string;
     watermark: string;
@@ -139,12 +137,11 @@ export const kkfileviewConfig: KkfileviewConfig = {
     basemetasExtensions: [...DEFAULT_EXTENSIONS],
     microsoftExtensions: [...DEFAULT_MICROSOFT_EXTENSIONS],
     fileViewerExtensions: [...DEFAULT_FILE_VIEWER_EXTENSIONS], // 设置 File Viewer 默认支持扩展名列表。
-    enablePrint: false,
     enableOpenInNewWindow: true,
     enableFullscreenButton: true,
     enableMobileAutoFullscreen: false,
     enableDownload: true,
-    enableFileViewerCdnToggle: true,
+    fileViewerLoadMode: 'proxy',
     basemetasRequestType: 'query',
     watermarkType: 'preview',
     watermark: '',
@@ -219,12 +216,11 @@ export function updateConfigCache(record?: KkfileviewConfigRecord | null) {
     kkfileviewConfig.basemetasExtensions = parseExtensions(record.basemetasExtensions, DEFAULT_EXTENSIONS);
     kkfileviewConfig.microsoftExtensions = parseExtensions(record.microsoftExtensions, DEFAULT_MICROSOFT_EXTENSIONS);
     kkfileviewConfig.fileViewerExtensions = parseExtensions(record.fileViewerExtensions, DEFAULT_FILE_VIEWER_EXTENSIONS); // 解析并更新 File Viewer 扩展名列表。
-    kkfileviewConfig.enablePrint = record.enablePrint === true;
     kkfileviewConfig.enableOpenInNewWindow = record.enableOpenInNewWindow ?? true;
     kkfileviewConfig.enableFullscreenButton = record.enableFullscreenButton ?? true;
     kkfileviewConfig.enableMobileAutoFullscreen = record.enableMobileAutoFullscreen === true;
     kkfileviewConfig.enableDownload = record.enableDownload ?? true;
-    kkfileviewConfig.enableFileViewerCdnToggle = record.enableFileViewerCdnToggle ?? true;
+    kkfileviewConfig.fileViewerLoadMode = record.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy';
     kkfileviewConfig.basemetasRequestType = record.basemetasRequestType === 'base64' ? 'base64' : 'query';
     kkfileviewConfig.watermarkType = record.watermarkType || 'preview';
     kkfileviewConfig.watermark = record.watermark || '';

@@ -52,7 +52,6 @@ type KkfileviewSettingsRecord = {
     enableBasemetas?: boolean;
     enableMicrosoft?: boolean;
     enableFileViewer?: boolean;
-    enablePrint?: boolean;
     enableOpenInNewWindow?: boolean;
     enableFullscreenButton?: boolean;
     enableMobileAutoFullscreen?: boolean;
@@ -64,6 +63,7 @@ type KkfileviewSettingsRecord = {
     watermarkType?: string;
     watermark?: string;
     fileViewerDownloaded?: boolean;
+    fileViewerLoadMode?: 'cdn' | 'proxy';
 };
 
 type SettingsFormValues = {
@@ -81,7 +81,6 @@ type SettingsFormValues = {
     enableMicrosoft: boolean;
     enableFileViewer: boolean;
     preferredPreview: PreviewEngine;
-    enablePrint: boolean;
     enableOpenInNewWindow: boolean;
     enableFullscreenButton: boolean;
     enableMobileAutoFullscreen: boolean;
@@ -92,6 +91,7 @@ type SettingsFormValues = {
     copyEmbedHtmlRoles: string[] | string;
     watermarkType: string;
     watermark: string;
+    fileViewerLoadMode: 'cdn' | 'proxy';
 };
 
 type ServiceHealthPayload = {
@@ -220,7 +220,6 @@ const FIELD_LABEL_MAP: Record<string, string> = {
     nocobaseHost: '系统公共访问地址',
     preferredPreview: '优先预览',
     basemetasRequestType: 'BaseMetas 请求类型',
-    enablePrint: '打印按钮',
     enableOpenInNewWindow: '新窗口按钮',
     enableFullscreenButton: '全屏按钮',
     enableMobileAutoFullscreen: '移动端自动全屏',
@@ -230,6 +229,7 @@ const FIELD_LABEL_MAP: Record<string, string> = {
     enableMicrosoft: '启用微软在线',
     enableFileViewer: '启用 File Viewer',
     fileViewerExtensions: 'File Viewer 文件格式',
+    fileViewerLoadMode: 'File Viewer 默认加载模式',
     watermarkType: '水印类型',
     watermark: '水印内容',
 };
@@ -475,7 +475,6 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             && (record.enableBasemetas ?? false) === false
             && (record.enableMicrosoft ?? true) === true
             && fileViewerState.enableFileViewer === false
-            && (record.enablePrint ?? false) === false
             && (record.enableOpenInNewWindow ?? true) === true
             && (record.enableFullscreenButton ?? true) === true
             && (record.enableMobileAutoFullscreen ?? false) === false
@@ -539,7 +538,6 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             fileViewerAssetBase: fileViewerState.fileViewerAssetBase,
             fileViewerExtensions: fileViewerState.fileViewerExtensions,
             nocobaseHost: String(currentRecord.nocobaseHost || '').trim(),
-            enablePrint: currentRecord.enablePrint === true,
             enableOpenInNewWindow: currentRecord.enableOpenInNewWindow !== false,
             enableFullscreenButton: currentRecord.enableFullscreenButton !== false,
             enableMobileAutoFullscreen: currentRecord.enableMobileAutoFullscreen === true,
@@ -550,6 +548,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             copyEmbedHtmlRoles: normalizeRoleNames(currentRecord.copyEmbedHtmlRoles),
             watermarkType: currentRecord.watermarkType || 'preview',
             watermark: currentRecord.watermark || '',
+            fileViewerLoadMode: currentRecord.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy',
         });
         setWatermarkTypeDraft(currentRecord.watermarkType === 'global' ? 'global' : 'preview');
         setWatermarkDraft(String(currentRecord.watermark || ''));
@@ -807,6 +806,14 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
         } finally {
             clearInterval(timer);
             setDownloadingFileViewer(false);
+            setTimeout(() => {
+                setDownloadProgress((prev) => {
+                    if (prev && (prev.percent === 100 || prev.status === 'completed')) {
+                        return null;
+                    }
+                    return prev;
+                });
+            }, 1500);
         }
     };
 
@@ -880,7 +887,6 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             enableMicrosoft: true,
             enableFileViewer: false,
             preferredPreview: 'microsoft' as PreviewEngine,
-            enablePrint: false,
             enableOpenInNewWindow: true,
             enableFullscreenButton: true,
             enableMobileAutoFullscreen: false,
@@ -891,9 +897,12 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             copyEmbedHtmlRoles: [],
             watermarkType: 'preview',
             watermark: '',
+            fileViewerLoadMode: 'proxy' as const,
         };
 
         form.setFieldsValue(resetValues);
+        setWatermarkTypeDraft('preview');
+        setWatermarkDraft('');
         setServiceState({
             enableKkfileview: true,
             enableBasemetas: false,
@@ -941,7 +950,10 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             });
 
             const watermarkSaveState = buildWatermarkSaveState(
-                { watermark: values.watermark, watermarkType: watermarkTypeDraft },
+                {
+                    watermark: (values.watermark !== undefined ? values.watermark : watermarkDraft) || '',
+                    watermarkType: (values.watermarkType as 'global' | 'preview') || watermarkTypeDraft || 'preview',
+                },
                 { watermarkType: 'preview', watermark: '' }
             );
 
@@ -960,7 +972,6 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 enableMicrosoft: values.enableMicrosoft === true,
                 enableFileViewer: fileViewerSaveState.enableFileViewer,
                 preferredPreview: values.preferredPreview,
-                enablePrint: values.enablePrint === true,
                 enableOpenInNewWindow: values.enableOpenInNewWindow === true,
                 enableFullscreenButton: values.enableFullscreenButton === true,
                 enableMobileAutoFullscreen: values.enableMobileAutoFullscreen === true,
@@ -971,6 +982,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 copyEmbedHtmlRoles: normalizeRoleNames(values.copyEmbedHtmlRoles),
                 watermarkType: watermarkSaveState.watermarkType,
                 watermark: watermarkSaveState.watermark,
+                fileViewerLoadMode: values.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy',
             };
 
             const changedFields = getChangedFieldNames(payload, currentRecord);
@@ -1067,8 +1079,14 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                     visible={activePanel === 'advanced'}
                     watermark={watermarkDraft}
                     watermarkType={watermarkTypeDraft}
-                    onWatermarkChange={(val) => setWatermarkDraft(val)}
-                    onWatermarkTypeChange={(val) => setWatermarkTypeDraft(val)}
+                    onWatermarkChange={(val) => {
+                        setWatermarkDraft(val);
+                        form.setFieldValue('watermark', val);
+                    }}
+                    onWatermarkTypeChange={(val) => {
+                        setWatermarkTypeDraft(val);
+                        form.setFieldValue('watermarkType', val);
+                    }}
                     onTestConnection={handleTestServiceConnectivity}
                     testingServices={testingServices}
                     validateServerUrl={validateServerUrl}

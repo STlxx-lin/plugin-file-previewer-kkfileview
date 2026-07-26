@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
-import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined, GlobalOutlined } from '@ant-design/icons';
+import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip, Watermark } from 'antd';
+import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
 import { FileViewerRenderer, FileViewerFetchFileFn } from '../FileViewerRenderer';
+import { resolveFileViewerAssetBase } from '../fileViewerRuntime';
 import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, parseExtensions } from '../previewUtils';
 import {
   EmbedCodePermission,
@@ -460,8 +461,9 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           }
           const encodedUrl = encodeURIComponent(Base64.encode(targetUrl));
           let previewUrl = `${baseUrl}?url=${encodedUrl}`;
-          if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
-            previewUrl += `&watermarkTxt=${encodeURIComponent(watermarkText)}`;
+          if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
+            const safeWm = encodeURIComponent(watermarkText);
+            previewUrl += `&watermarkTxt=${safeWm}&watermarkXSpace=10&watermarkYSpace=10&watermarkFontsize=18px&watermarkColor=rgba(0,0,0,0.18)&watermarkAlpha=0.18&watermarkAngle=30`;
           }
           acc[service.key] = previewUrl;
           return acc;
@@ -496,22 +498,30 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           const fileName = encodeURIComponent(normalizedFileName);
           const displayName = encodeURIComponent(normalizedDisplayName);
           let previewUrl = '';
-          const useBase64Mode = true;
+          const useBase64Mode = kkfileviewConfig.basemetasRequestType === 'base64';
           if (useBase64Mode) {
-            const encodedData = encodeURIComponent(Base64.encode(JSON.stringify({
+            const payloadObj: Record<string, any> = {
               url: targetUrl,
               fileName: normalizedFileName,
               displayName: normalizedDisplayName,
               ext: fileMeta.ext,
-            })));
+            };
+            if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
+              payloadObj.watermark = watermarkText;
+              payloadObj.watermarkTxt = watermarkText;
+              payloadObj.watermarkFontsize = '18px';
+              payloadObj.watermarkColor = 'rgba(0,0,0,0.18)';
+              payloadObj.watermarkAlpha = '0.18';
+            }
+            const encodedData = encodeURIComponent(Base64.encode(JSON.stringify(payloadObj)));
             previewUrl = `${baseUrl}?data=${encodedData}`;
           } else {
             const extParam = fileMeta.ext ? `&ext=${encodeURIComponent(fileMeta.ext)}&fileType=${encodeURIComponent(fileMeta.ext)}` : '';
             previewUrl = `${baseUrl}?url=${url}&fileName=${fileName}&displayName=${displayName}${extParam}`;
           }
-          if (watermarkText && kkfileviewConfig.watermarkType === 'preview') {
-            previewUrl += `&watermark=${encodeURIComponent(watermarkText)}`;
-            previewUrl += `&watermarkTxt=${encodeURIComponent(watermarkText)}`;
+          if (watermarkText && (kkfileviewConfig.watermarkType === 'preview' || kkfileviewConfig.watermarkType === 'global')) {
+            const safeWm = encodeURIComponent(watermarkText);
+            previewUrl += `&watermark=${safeWm}&watermarkTxt=${safeWm}&watermarkFontsize=18px&watermarkColor=rgba(0,0,0,0.18)&watermarkAlpha=0.18`;
           }
           acc[service.key] = previewUrl;
           return acc;
@@ -545,7 +555,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const [iframeLoadFailed, setIframeLoadFailed] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
   const [iframeRetrySeed, setIframeRetrySeed] = useState(0);
-  const [fileViewerCdnMode, setFileViewerCdnMode] = useState(false);
   const [fileViewerProgress, setFileViewerProgress] = useState<number>(0);
   const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iframeLoadedRef = useRef(false);
@@ -657,12 +666,142 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     e.preventDefault();
     e.stopPropagation();
     if (unsupportedFile) return;
+
+    if (previewMode === 'fileViewer') {
+      const popup = window.open('', '_blank');
+      if (popup) {
+        const resolvedAssetBase = resolveFileViewerAssetBase(
+          serviceConfigMap.fileViewer.host,
+          kkfileviewConfig.fileViewerDownloaded
+        );
+        const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
+        const safeTitle = escapeHtml(viewerFileName);
+        const safeFileUrl = JSON.stringify(fileMeta.fullUrl);
+        const safeFileName = JSON.stringify(viewerFileName);
+        const safeAssetBase = JSON.stringify(resolvedAssetBase);
+        const safeWatermark = watermarkText ? JSON.stringify(watermarkText) : 'null';
+
+        const htmlContent = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${safeTitle}</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #viewer-host {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    #loading-mask {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      z-index: 999;
+      transition: opacity 0.3s;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1677ff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer-host">
+    <div id="loading-mask">
+      <div class="spinner"></div>
+      <p style="margin-top: 16px; color: #666; font-size: 14px;">正在加载 File Viewer 预览组件...</p>
+    </div>
+  </div>
+  <script src="${scriptUrl}"></script>
+  <script>
+    (function() {
+      var attempts = 0;
+      function startViewer() {
+        var globalLib = window.FlyfishFileViewerWebFull;
+        var host = document.getElementById('viewer-host');
+        var loadingMask = document.getElementById('loading-mask');
+        if (!globalLib || !globalLib.mountViewer || !host) {
+          attempts++;
+          if (attempts < 100) {
+            setTimeout(startViewer, 100);
+          } else if (loadingMask) {
+            loadingMask.innerHTML = '<p style="color: #ff4d4f; font-size: 14px;">预览组件加载超时，请刷新重试</p>';
+          }
+          return;
+        }
+        if (globalLib.setDefaultFullAssetBaseUrl) {
+          globalLib.setDefaultFullAssetBaseUrl(${safeAssetBase});
+        }
+        var wm = ${safeWatermark};
+        var options = { styleIsolation: 'shadow' };
+        if (wm) {
+          options.watermark = wm;
+        }
+        try {
+          globalLib.mountViewer(host, {
+            url: ${safeFileUrl},
+            name: ${safeFileName},
+            filename: ${safeFileName},
+            options: options
+          });
+          if (loadingMask) {
+            loadingMask.style.opacity = '0';
+            setTimeout(function() { if (loadingMask.parentNode) loadingMask.parentNode.removeChild(loadingMask); }, 300);
+          }
+        } catch(err) {
+          console.error('[FileViewer Error]', err);
+          if (loadingMask) {
+            loadingMask.innerHTML = '<p style="color: #ff4d4f; font-size: 14px;">预览渲染失败，请检查网络</p>';
+          }
+        }
+      }
+
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        startViewer();
+      } else {
+        window.addEventListener('DOMContentLoaded', startViewer);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+
+        popup.document.open();
+        popup.document.write(htmlContent);
+        popup.document.close();
+        return;
+      }
+    }
+
     if (!resolvedPreviewUrl) return;
     const popup = window.open(resolvedPreviewUrl, '_blank', 'noopener,noreferrer');
     if (popup) {
-      try { popup.opener = null; } catch {}
+      try { popup.opener = null; } catch { }
     }
-  }, [resolvedPreviewUrl, unsupportedFile]);
+  }, [unsupportedFile, previewMode, serviceConfigMap.fileViewer.host, kkfileviewConfig.fileViewerDownloaded, viewerFileName, fileMeta.fullUrl, watermarkText, resolvedPreviewUrl]);
 
   const openEmbedConfigModal = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -705,23 +844,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     setIframeLoadFailed(false);
     setIframeRetrySeed((value) => value + 1);
   }, []);
-
-  const handleToggleCdnMode = useCallback(() => {
-    setFileViewerCdnMode((prev) => !prev);
-    // 切换模式后重新挂载 FileViewer 以使新的 fetch 策略立即生效
-    setIframeRetrySeed((value) => value + 1);
-    iframeLoadedRef.current = false;
-    setIframeLoadFailed(false);
-    setIframeLoading(true);
-    setFileViewerProgress(0);
-  }, []);
-
-  // previewMode 切换离开 fileViewer 时，重置 CDN 模式为默认的代理模式
-  useEffect(() => {
-    if ((previewMode as string) !== 'fileViewer') {
-      setFileViewerCdnMode(false);
-    }
-  }, [previewMode]);
 
   useEffect(() => {
     if (!isPreviewFullscreen) {
@@ -885,8 +1007,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                   key={`fv-${iframeRetrySeed}`}
                   fileUrl={resolvedPreviewUrl}
                   fileName={viewerFileName}
+                  watermark={watermarkText}
+                  enableDownload={kkfileviewConfig.enableDownload !== false}
                   assetBase={serviceConfigMap.fileViewer.host}
-                  fetchFile={fileViewerCdnMode ? undefined : fetchFileWithAuth}
+                  fetchFile={kkfileviewConfig.fileViewerLoadMode === 'cdn' ? undefined : fetchFileWithAuth}
                   onReady={() => {
                     iframeLoadedRef.current = true;
                     setIframeLoadFailed(false);
@@ -949,10 +1073,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                       {previewMode === 'basemetas'
                         ? t('BaseMetas is loading preview...')
                         : previewMode === 'kkfileview'
-                        ? t('kkFileView is loading preview...')
-                        : previewMode === 'microsoft'
-                        ? t('Microsoft Online Viewer is loading preview...')
-                        : t('Loading preview...')}
+                          ? t('kkFileView is loading preview...')
+                          : previewMode === 'microsoft'
+                            ? t('Microsoft Online Viewer is loading preview...')
+                            : t('Loading preview...')}
                     </Typography.Text>
                   </Space>
                 </div>
@@ -960,34 +1084,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             </div>
           )}
 
-          {watermarkText && kkfileviewConfig.watermarkType === 'global' && (
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                pointerEvents: 'none',
-                zIndex: 9,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  transform: 'rotate(-30deg)',
-                  fontSize: 20,
-                  color: 'rgba(0,0,0,0.15)',
-                  fontWeight: 600,
-                  textAlign: 'center',
-                  whiteSpace: 'pre-wrap',
-                  userSelect: 'none',
-                }}
-              >
-                {watermarkText}
-              </div>
-            </div>
-          )}
 
           {isPreviewFullscreen && (
             <Button
@@ -1118,26 +1214,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
               ) : (
                 <Button icon={isPreviewFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={handleToggleFullscreen}>
                   {isPreviewFullscreen ? t('Exit Fullscreen') : t('Fullscreen')}
-                </Button>
-              )
-            )}
-            {(previewMode as string) === 'fileViewer' && kkfileviewConfig.enableFileViewerCdnToggle !== false && (
-              isMobileViewport ? (
-                <Tooltip title={fileViewerCdnMode ? t('CDN Mode (direct link)') : t('Proxy Mode (authenticated)')}>
-                  <Button
-                    size="small"
-                    icon={<GlobalOutlined />}
-                    onClick={handleToggleCdnMode}
-                    type={fileViewerCdnMode ? 'primary' : 'default'}
-                  />
-                </Tooltip>
-              ) : (
-                <Button
-                  icon={<GlobalOutlined />}
-                  onClick={handleToggleCdnMode}
-                  type={fileViewerCdnMode ? 'primary' : 'default'}
-                >
-                  {fileViewerCdnMode ? t('CDN Mode') : t('Proxy Mode')}
                 </Button>
               )
             )}

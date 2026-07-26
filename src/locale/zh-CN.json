@@ -83,8 +83,6 @@
   "Allow Fullscreen": "允许全屏",
   "Copy": "复制",
   "Cancel": "取消",
-  "Enable Print Button": "显示打印按钮",
-  "Show print button in preview dialog (disabled by default)": "在预览弹窗中显示打印按钮（默认关闭）",
   "Enable Open In New Window Button": "显示“在新窗口打开”按钮",
   "Show open in new window button in preview dialog (enabled by default)": "在预览弹窗中显示“在新窗口打开”按钮（默认开启）",
   "Enable Fullscreen Button": "显示全屏按钮",
@@ -174,10 +172,8 @@
   "Static files downloaded/copied successfully": "静态文件下载/提取成功",
   "Failed to download File Viewer static files": "提取 File Viewer 静态文件失败",
   "Loading preview component...": "正在加载预览组件...",
-  "CDN Mode": "CDN 模式",
-  "CDN Mode (direct link)": "CDN 模式（直链）",
-  "Proxy Mode": "代理模式",
-  "Proxy Mode (authenticated)": "代理模式（认证）",
-  "Enable File Viewer CDN Toggle Button": "显示 File Viewer CDN 切换按鈕",
-  "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "当使用 File Viewer 引擎时，在预览弹窗中显示 CDN/代理模式切换按鈕（默认开启）"
+  "File Viewer Default Load Mode": "File Viewer 默认加载模式",
+  "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN 模式：直接使用公开 URL 加载文件（适合公开 CDN 直链）。代理模式：通过 NocoBase 携带认证 Token 代理加载（适合内部存储）。",
+  "Proxy Mode (default, authenticated)": "代理模式（默认，携带认证）",
+  "CDN Mode (direct link)": "CDN 模式（直链）"
 }

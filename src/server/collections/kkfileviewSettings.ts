@@ -101,11 +101,6 @@ export default defineCollection({
         },
         {
             type: 'boolean',
-            name: 'enablePrint',
-            defaultValue: false,
-        },
-        {
-            type: 'boolean',
             name: 'enableOpenInNewWindow',
             defaultValue: true,
         },
@@ -163,6 +158,11 @@ export default defineCollection({
             type: 'string',
             name: 'preferredPreview',  // 优先预览引擎：microsoft | kkfileview | basemetas | none
             defaultValue: DEFAULT_PREFERRED_PREVIEW,
+        },
+        {
+            type: 'string',
+            name: 'fileViewerLoadMode', // File Viewer 默认加载模式: 'proxy' | 'cdn'
+            defaultValue: 'proxy',
         },
     ],
 });

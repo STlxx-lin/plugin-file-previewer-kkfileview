@@ -69,12 +69,11 @@ const CHANGE_FIELD_LABEL_MAP: Record<string, string> = {
   fileViewerExtensions: 'File Viewer 文件格式',
   preferredPreview: '优先预览',
   basemetasRequestType: 'BaseMetas 请求类型',
-  enablePrint: '打印按钮',
-  enableOpenInNewWindow: '新窗口按钮',
-  enableFullscreenButton: '全屏按钮',
+  enableOpenInNewWindow: '新窗口按鈕',
+  enableFullscreenButton: '全屏按鈕',
   enableMobileAutoFullscreen: '移动端自动全屏',
-  enableDownload: '下载按钮',
-  enableFileViewerCdnToggle: 'File Viewer CDN 切换按钮',
+  enableDownload: '下载按鈕',
+  fileViewerLoadMode: 'File Viewer 默认加载模式',
   enableKkfileview: '启用 kkFileView',
   enableBasemetas: '启用 BaseMetas',
   enableMicrosoft: '启用微软在线',
@@ -479,6 +478,21 @@ const renderAdvancedServiceConfigCard = (
             )}
           </div>
         )}
+
+        <div style={{ marginTop: 12, padding: '12px 16px', background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+          <Typography.Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13 }}>
+            {t('File Viewer Default Load Mode')}
+          </Typography.Text>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 8, fontSize: 11, lineHeight: '1.4' }}>
+            {t('CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).')}
+          </Typography.Paragraph>
+          <Form.Item name="fileViewerLoadMode" style={{ marginBottom: 0 }}>
+            <Radio.Group buttonStyle="solid">
+              <Radio.Button value="proxy">{t('Proxy Mode (default, authenticated)')}</Radio.Button>
+              <Radio.Button value="cdn">{t('CDN Mode (direct link)')}</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+        </div>
       </>
     )}
   </div>
@@ -675,23 +689,6 @@ export const BasicSettingsCard = ({
         <Col xs={24} md={12}>
           <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <Typography.Text strong>{t('Enable Print Button')}</Typography.Text>
-              <Form.Item
-                name="enablePrint"
-                valuePropName="checked"
-                noStyle
-              >
-                <Switch />
-              </Form.Item>
-            </div>
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 6, fontSize: 12 }}>
-              {t('Show print button in preview dialog (disabled by default)')}
-            </Typography.Paragraph>
-          </div>
-        </Col>
-        <Col xs={24} md={12}>
-          <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <Typography.Text strong>{t('Enable Open In New Window Button')}</Typography.Text>
               <Form.Item
                 name="enableOpenInNewWindow"
@@ -754,23 +751,6 @@ export const BasicSettingsCard = ({
             </div>
             <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 6, fontSize: 12 }}>
               {t('Show download button in preview dialog (enabled by default)')}
-            </Typography.Paragraph>
-          </div>
-        </Col>
-        <Col xs={24} md={12}>
-          <div style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <Typography.Text strong>{t('Enable File Viewer CDN Toggle Button')}</Typography.Text>
-              <Form.Item
-                name="enableFileViewerCdnToggle"
-                valuePropName="checked"
-                noStyle
-              >
-                <Switch />
-              </Form.Item>
-            </div>
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 6, fontSize: 12 }}>
-              {t('Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)')}
             </Typography.Paragraph>
           </div>
         </Col>
@@ -971,20 +951,21 @@ export const AdvancedSettingsCard = ({
       style={{ marginBottom: 0, background: '#fafafa', border: '1px solid #f0f0f0' }} // 与其它小卡片统一浅灰背景和边框
       bodyStyle={{ padding: 16 }} // 统一内边距
     >
-      <Form.Item style={{ marginBottom: 12 }}> {/* 使用受控组件承接水印类型，避免表单注册异常时丢值 */}
-        <Radio.Group value={resolvedWatermarkType} onChange={(event) => onWatermarkTypeChange(event.target.value === 'global' ? 'global' : 'preview')}> {/* 切换全局水印和预览水印 */}
-          <Radio.Button value="global">{t('Global Watermark')}</Radio.Button> {/* 全局水印选项 */}
-          <Radio.Button value="preview">{t('Preview Watermark')}</Radio.Button> {/* 预览水印选项 */}
+      <Form.Item name="watermarkType" style={{ marginBottom: 12 }}>
+        <Radio.Group onChange={(event) => onWatermarkTypeChange(event.target.value === 'global' ? 'global' : 'preview')}>
+          <Radio.Button value="global">{t('Global Watermark')}</Radio.Button>
+          <Radio.Button value="preview">{t('Preview Watermark')}</Radio.Button>
         </Radio.Group>
       </Form.Item>
       <Form.Item
-        labelCol={{ span: 0 }} // 不展示标签列，保持与其它卡片一致
-        wrapperCol={{ span: 24 }} // 输入框占满整行
-        label={resolvedWatermarkType === 'global' ? t('Global Watermark') : t('Preview Watermark')} // 根据当前水印类型动态切换标签文案
-        extra={`${t('Set a text watermark for the previewed file (optional)')} ${t('Supported variables: {{user.username}}, {{user.nickname}}, {{user.department}}, {{request.time}}')}`} // 保留原有水印变量说明
-        style={{ marginBottom: 0 }} // 去掉底部多余间距
+        name="watermark"
+        labelCol={{ span: 0 }}
+        wrapperCol={{ span: 24 }}
+        label={resolvedWatermarkType === 'global' ? t('Global Watermark') : t('Preview Watermark')}
+        extra={`${t('Set a text watermark for the previewed file (optional)')} ${t('Supported variables: {{user.username}}, {{user.nickname}}, {{user.department}}, {{request.time}}')}`}
+        style={{ marginBottom: 0 }}
       >
-        <Input value={watermark} onChange={(event) => onWatermarkChange(event.target.value)} placeholder={t('e.g. {{user.department}} {{request.time}}')} /> {/* 水印内容输入框改为显式受控，确保输入值一定进入保存状态 */}
+        <Input onChange={(event) => onWatermarkChange(event.target.value)} placeholder={t('e.g. {{user.department}} {{request.time}}')} />
       </Form.Item>
     </Card>
   </Card>

@@ -54,8 +54,6 @@
   "Allow Fullscreen": "Volledig scherm toestaan",
   "Copy": "Kopiëren",
   "Cancel": "Annuleren",
-  "Enable Print Button": "Afdrukknop inschakelen",
-  "Show print button in preview dialog (disabled by default)": "Toon afdrukknop in voorbeeldvenster",
   "Enable Open In New Window Button": "Knop 'Openen in nieuw venster' inschakelen",
   "Show open in new window button in preview dialog (enabled by default)": "Toon knop 'Openen in nieuw venster' in voorbeeldvenster",
   "Enable Fullscreen Button": "Knop 'Volledig scherm' inschakelen",
@@ -174,10 +172,8 @@
   "Static files downloaded/copied successfully": "Statische bestanden succesvol gedownload/gekopieerd",
   "Failed to download File Viewer static files": "Fout bij downloaden van statische File Viewer-bestanden",
   "Loading preview component...": "Preview-component laden...",
-  "CDN Mode": "CDN-modus",
-  "CDN Mode (direct link)": "CDN-modus (directe link)",
-  "Proxy Mode": "Proxy-modus",
-  "Proxy Mode (authenticated)": "Proxy-modus (geverifieerd)",
-  "Enable File Viewer CDN Toggle Button": "CDN-wisselknop voor File Viewer inschakelen",
-  "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "Toon CDN/Proxy-modusknop in voorbeeldvenster bij gebruik van File Viewer (standaard ingeschakeld)"
+  "File Viewer Default Load Mode": "Standaard laadmodus File Viewer",
+  "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN-modus: File Viewer laadt het bestand rechtstreeks via de openbare URL. Proxy-modus: verzoeken worden via NocoBase doorgegeven met authenticatietoken.",
+  "Proxy Mode (default, authenticated)": "Proxy-modus (standaard, geverifieerd)",
+  "CDN Mode (direct link)": "CDN-modus (directe link)"
 }

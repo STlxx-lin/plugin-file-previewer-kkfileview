@@ -377,10 +377,6 @@ export default {
             type: 'boolean',
             description: '是否启用 Microsoft 预览',
           },
-          enablePrint: {
-            type: 'boolean',
-            description: '是否启用打印',
-          },
           enableOpenInNewWindow: {
             type: 'boolean',
             description: '是否显示“新窗口打开”按钮',
@@ -428,6 +424,10 @@ export default {
           preferredPreview: {
             type: 'string',
             description: '优先预览服务（microsoft | kkfileview | basemetas | none）',
+          },
+          fileViewerLoadMode: {
+            type: 'string',
+            description: 'File Viewer 默认加载模式（proxy | cdn）',
           },
         },
       },

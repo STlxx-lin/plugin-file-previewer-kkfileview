@@ -54,8 +54,6 @@
     "Allow Fullscreen": "Allow Fullscreen",
     "Copy": "Copy",
     "Cancel": "Cancel",
-    "Enable Print Button": "Enable Print Button",
-    "Show print button in preview dialog (disabled by default)": "Show print button in preview dialog (disabled by default)",
     "Enable Open In New Window Button": "Enable Open In New Window Button",
     "Show open in new window button in preview dialog (enabled by default)": "Show open in new window button in preview dialog (enabled by default)",
     "Enable Fullscreen Button": "Enable Fullscreen Button",
@@ -174,10 +172,8 @@
     "Static files downloaded/copied successfully": "Static files downloaded/copied successfully",
     "Failed to download File Viewer static files": "Failed to download File Viewer static files",
     "Loading preview component...": "Loading preview component...",
-    "CDN Mode": "CDN Mode",
-    "CDN Mode (direct link)": "CDN Mode (direct link)",
-    "Proxy Mode": "Proxy Mode",
-    "Proxy Mode (authenticated)": "Proxy Mode (authenticated)",
-    "Enable File Viewer CDN Toggle Button": "Enable File Viewer CDN Toggle Button",
-    "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)": "Show CDN/Proxy mode toggle button in preview dialog when using File Viewer engine (enabled by default)"
+    "File Viewer Default Load Mode": "File Viewer Default Load Mode",
+    "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).",
+    "Proxy Mode (default, authenticated)": "Proxy Mode (default, authenticated)",
+    "CDN Mode (direct link)": "CDN Mode (direct link)"
 }

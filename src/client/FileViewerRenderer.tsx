@@ -28,6 +28,12 @@ export type FileViewerRendererProps = { // 导出 File Viewer 渲染组件属性
   assetBase: string; // 声明资源基址属性。
   fileUrl: string; // 声明文件地址属性。
   fileName: string; // 声明文件名属性。
+  /** 可选：水印文本内容，由 options.watermark 原生渲染。 */
+  watermark?: string; // 声明可选的水印文本属性。
+  /** 可选：控制工具栏下载按钮。 */
+  enableDownload?: boolean;
+  /** 可选：工具栏定位策略 ('auto' | 'top' | 'top-center' | 'bottom-right')。 */
+  toolbarPosition?: 'auto' | 'top' | 'top-center' | 'bottom-right';
   /** 可选：调用方提供的认证下载函数，用于让库通过认证渠道获取受保护的文件内容。 */
   fetchFile?: FileViewerFetchFileFn; // 声明可选的认证下载函数属性。
   fileViewerDownloaded?: boolean; // 声明是否已下载本地依赖属性。
@@ -98,7 +104,7 @@ function loadScriptWithProgress(src: string, onProgress?: (percent: number) => v
 }
 
 export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 File Viewer 渲染组件。
-  const { assetBase, fileUrl, fileName, fetchFile, fileViewerDownloaded, onReady, onError, onProgress } = props; // 解构组件所需的核心属性与回调。
+  const { assetBase, fileUrl, fileName, watermark, enableDownload, toolbarPosition, fetchFile, fileViewerDownloaded, onReady, onError, onProgress } = props; // 解构组件所需的核心属性与回调。
   const hostRef = useRef<HTMLDivElement>(null); // 创建宿主容器引用以供挂载 Viewer。
 
   const fetchFileRef = useRef(fetchFile);
@@ -125,7 +131,7 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
     const mount = async () => { // 定义异步挂载流程。
       try { // 捕获动态加载或挂载过程中的运行异常。
         const resolvedAssetBase = resolveFileViewerAssetBase(assetBase, fileViewerDownloaded); // 解析最终生效 of 资源基址。
-        
+
         // 动态加载 UMD/IIFE 打包好的静态 JS 资源，而不是由打包器静态编译，以绕过打包器编译错误
         const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
 
@@ -158,23 +164,58 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
          */
         const coreOptions = fetchFileRef.current
           ? {
-              fetchFile: async (input: { url: string; signal?: AbortSignal }) => {
-                // 将调用方注入 of 认证下载函数包装为符合库签名 of fetchFile 回调。
-                return fetchFileRef.current?.({ url: input.url, signal: input.signal }) ?? null;
-              },
-            }
+            fetchFile: async (input: { url: string; signal?: AbortSignal }) => {
+              // 将调用方注入 of 认证下载函数包装为符合库签名 of fetchFile 回调。
+              return fetchFileRef.current?.({ url: input.url, signal: input.signal }) ?? null;
+            },
+          }
           : undefined; // 当调用方未提供 fetchFile 时不注入 coreOptions，使用库默认行为。
 
-        controller = (mountViewer(
-          host, // 宿主容器。
-          { // ViewerMountOptions
-            url: fileUrl, // 传入待预览文件地址。
-            filename: fileName, // 传入文件名以辅助格式识别与展示。
-            options: { // 传入最小化运行参数以提升宿主稳定性。
-              styleIsolation: 'shadow', // 使用 Shadow DOM 隔离后台全局样式干扰。
-            }, // 结束最小运行参数定义。
+        const normalizedWatermark = watermark ? String(watermark).trim() : '';
+
+        // 遵循官方规范构建 options 配置：options.watermark 支持文字/图片水印，options.toolbar 控制下载/打印/位置等
+        const viewerOptions: Record<string, any> = {
+          styleIsolation: 'shadow', // 使用 Shadow DOM 隔离后台全局样式干扰
+        };
+
+        if (normalizedWatermark) {
+          viewerOptions.watermark = normalizedWatermark;
+        }
+
+        if (enableDownload === false || toolbarPosition) {
+          viewerOptions.toolbar = {
+            ...(enableDownload === false ? { download: false } : {}),
+            ...(toolbarPosition ? { position: toolbarPosition } : {}),
+          };
+        }
+
+        const mountParams: Record<string, any> = {
+          url: fileUrl, // 官方可用参数：url (文件地址)
+          name: fileName, // 官方可用参数：name (文件名)
+          filename: fileName, // 兼容 filename 别名
+          watermark: normalizedWatermark, // 官方可用参数/JS Property: watermark
+          options: viewerOptions, // 官方可用参数：options (包含 watermark、styleIsolation、toolbar 等)
+          onEvent: (event: any) => { // 官方可用参数：onEvent 状态与生命周期监听
+            if (event?.type === 'ready' || event?.type === 'loaded') {
+              onReadyRef.current?.();
+            } else if (event?.type === 'error') {
+              onErrorRef.current?.(event?.error || new Error('FileViewer render error'));
+            }
           },
-          coreOptions, // 可选：注入认证下载函数，覆盖库内部的裸 fetch 行为。
+        };
+
+        if (normalizedWatermark && host) {
+          try {
+            host.setAttribute('watermark', normalizedWatermark);
+          } catch {
+            // ignore
+          }
+        }
+
+        controller = (mountViewer(
+          host, // 宿主容器
+          mountParams,
+          coreOptions, // 可选：注入认证下载函数
         ) || null) as FileViewerController | null; // 保存返回的控制器对象，便于后续清理。
 
         if (disposed) { // 当异步挂载完成前组件已经卸载时立即清理刚创建的实例。
@@ -197,7 +238,7 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
       disposed = true; // 标记组件已卸载，阻止异步流程继续更新状态。
       cleanupViewerController(controller, host); // 调用统一清理工具释放控制器与宿主 DOM。
     }; // 结束 effect 清理逻辑定义。
-  }, [assetBase, fileUrl, fileName, fileViewerDownloaded]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
+  }, [assetBase, fileUrl, fileName, watermark, enableDownload, toolbarPosition, fileViewerDownloaded]); // 仅在影响挂载结果的依赖变化时重建 Viewer。
 
-  return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />; // 返回占满可用空间的宿主容器供 File Viewer 挂载。
+  return <div ref={hostRef} style={{ width: '100%', height: '100%' }} />;
 } // 结束 File Viewer 渲染组件定义。
