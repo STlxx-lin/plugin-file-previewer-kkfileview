@@ -131,12 +131,12 @@ type BasicProps = {
 };
 
 type AdvancedProps = {
-  onTestConnection: (service: PreviewService) => void;
+  onTestConnection?: (service: PreviewService) => void;
   onWatermarkChange: (value: string) => void;
   onWatermarkTypeChange: (value: 'global' | 'preview') => void;
   t: Translation;
-  testingServices: Record<PreviewService, boolean>;
-  validateServerUrl: (value?: string) => boolean;
+  testingServices?: Record<PreviewService, boolean>;
+  validateServerUrl?: (value?: string) => boolean;
   visible: boolean;
   watermark: string;
   watermarkType: 'global' | 'preview';

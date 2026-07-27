@@ -119,6 +119,9 @@ interface KkfileviewConfig {
     basemetasRequestType: BasemetasRequestType;
     watermarkType: string;
     watermark: string;
+    watermarkOpacity: number;
+    watermarkRotate: number;
+    watermarkColor: string;
     enableKkfileview: boolean;
     enableBasemetas: boolean;
     enableMicrosoft: boolean;
@@ -148,6 +151,9 @@ export const kkfileviewConfig: KkfileviewConfig = {
     basemetasRequestType: 'query',
     watermarkType: 'preview',
     watermark: '',
+    watermarkOpacity: 0.18,
+    watermarkRotate: -24,
+    watermarkColor: 'rgba(0, 0, 0, 0.18)',
     enableKkfileview: true,
     enableBasemetas: false,
     enableMicrosoft: true,

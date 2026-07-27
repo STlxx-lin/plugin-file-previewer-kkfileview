@@ -38,6 +38,9 @@ type HealthCheckSettings = {
   microsoftHost?: string;
   watermarkType?: string;
   watermark?: string;
+  watermarkOpacity?: number;
+  watermarkRotate?: number;
+  watermarkColor?: string;
 };
 
 type KkfileviewSettingsRecord = HealthCheckSettings & {
