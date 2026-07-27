@@ -78,12 +78,20 @@ export function unwrapDataArray(payload: unknown, depth = 0): Array<Record<strin
     return payload as Array<Record<string, unknown>>;
   }
   if (!payload || typeof payload !== 'object') return [];
-  const root = payload as { data?: unknown };
+  const root = payload as Record<string, unknown>;
   if (Array.isArray(root.data)) {
     return root.data as Array<Record<string, unknown>>;
   }
+  if (Array.isArray(root.items)) {
+    return root.items as Array<Record<string, unknown>>;
+  }
   if (root.data && typeof root.data === 'object') {
-    return unwrapDataArray(root.data, depth + 1);
+    const nested = unwrapDataArray(root.data, depth + 1);
+    if (nested.length > 0) return nested;
+    return [root.data as Record<string, unknown>];
+  }
+  if (Object.keys(root).length > 0) {
+    return [root];
   }
   return [];
 }

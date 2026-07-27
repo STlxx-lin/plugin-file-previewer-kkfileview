@@ -754,53 +754,76 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           let cleanedCount = 0;
           for (const rowItem of list) {
             const row = (rowItem || {}) as KkfileviewSettingsRecord;
-            const patch: Record<string, unknown> = {};
+            // ── 第一步：确定需要迁移的新字段值（新字段缺失时先从旧字段补齐）────────
+            const migrationPatch: Record<string, unknown> = {};
             const legacyHost = String(row.host || '').trim();
             const legacyService = String(row.serviceType || '').trim().toLowerCase();
             const legacyPrefer = row.preferKkfileview;
             const legacyExt = parseExtensionsText(row.extensions, DEFAULT_EXTENSIONS);
+
             if (!String(row.kkfileviewHost || '').trim()) {
-              patch.kkfileviewHost = legacyService === 'kkfileview' && legacyHost ? legacyHost : DEFAULT_KKFILEVIEW_HOST;
+              migrationPatch.kkfileviewHost = legacyService === 'kkfileview' && legacyHost ? legacyHost : DEFAULT_KKFILEVIEW_HOST;
             }
             if (!String(row.basemetasHost || '').trim()) {
-              patch.basemetasHost = legacyService === 'basemetas' && legacyHost ? legacyHost : DEFAULT_BASEMETAS_HOST;
+              migrationPatch.basemetasHost = legacyService === 'basemetas' && legacyHost ? legacyHost : DEFAULT_BASEMETAS_HOST;
             }
             if (!String(row.microsoftHost || '').trim()) {
-              patch.microsoftHost = DEFAULT_MICROSOFT_HOST;
+              migrationPatch.microsoftHost = DEFAULT_MICROSOFT_HOST;
             }
             if (!String(row.kkfileviewExtensions || '').trim()) {
-              patch.kkfileviewExtensions = JSON.stringify(legacyExt);
+              migrationPatch.kkfileviewExtensions = JSON.stringify(legacyExt);
             }
             if (!String(row.basemetasExtensions || '').trim()) {
-              patch.basemetasExtensions = JSON.stringify(legacyExt);
+              migrationPatch.basemetasExtensions = JSON.stringify(legacyExt);
             }
             if (!String(row.microsoftExtensions || '').trim()) {
-              patch.microsoftExtensions = JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS);
+              migrationPatch.microsoftExtensions = JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS);
             }
-            if (row.enableKkfileview === undefined) patch.enableKkfileview = true;
-            if (row.enableBasemetas === undefined) patch.enableBasemetas = legacyService === 'basemetas';
-            if (row.enableMicrosoft === undefined) patch.enableMicrosoft = legacyPrefer === false;
+            if (row.enableKkfileview === undefined) migrationPatch.enableKkfileview = true;
+            if (row.enableBasemetas === undefined) migrationPatch.enableBasemetas = legacyService === 'basemetas';
+            if (row.enableMicrosoft === undefined) migrationPatch.enableMicrosoft = legacyPrefer === false;
             if (!row.preferredPreview) {
-              patch.preferredPreview = legacyPrefer === false
+              migrationPatch.preferredPreview = legacyPrefer === false
                 ? 'microsoft'
                 : legacyService === 'basemetas'
                   ? 'basemetas'
                   : DEFAULT_PREFERRED_PREVIEW;
             }
-            const beforeSize = Object.keys(patch).length;
-            patch.host = '';
-            patch.extensions = '[]';
-            patch.preferKkfileview = false;
-            patch.serviceType = '';
-            const afterSize = Object.keys(patch).length;
-            if (afterSize <= 4 && beforeSize === 0) {
-              continue;
+
+            // ── 第二步：新字段均已确认有值后，才清空旧兼容字段 ───────────────────
+            // 以迁移后的最终值（patch 中的 or 行中已有的）来判断是否可以安全清空旧字段。
+            const finalKkviewHost = String(migrationPatch.kkfileviewHost ?? row.kkfileviewHost ?? '').trim();
+            const finalBasemetasHost = String(migrationPatch.basemetasHost ?? row.basemetasHost ?? '').trim();
+            const finalMicrosoftHost = String(migrationPatch.microsoftHost ?? row.microsoftHost ?? '').trim();
+            const finalKkviewExt = String(migrationPatch.kkfileviewExtensions ?? row.kkfileviewExtensions ?? '').trim();
+            const finalBasemetasExt = String(migrationPatch.basemetasExtensions ?? row.basemetasExtensions ?? '').trim();
+            const finalMicrosoftExt = String(migrationPatch.microsoftExtensions ?? row.microsoftExtensions ?? '').trim();
+
+            const cleanupPatch: Record<string, unknown> = {};
+            // 三个主机新字段均有值时，才清空旧 host 字段
+            if (finalKkviewHost && finalBasemetasHost && finalMicrosoftHost) {
+              cleanupPatch.host = '';
             }
+            // 三个扩展名新字段均有值时，才清空旧 extensions 字段
+            if (finalKkviewExt && finalBasemetasExt && finalMicrosoftExt) {
+              cleanupPatch.extensions = '[]';
+            }
+            // preferredPreview 已覆盖 preferKkfileview 语义，可安全清零
+            cleanupPatch.preferKkfileview = false;
+            // serviceType 已无实际读取路径，可安全清空
+            cleanupPatch.serviceType = '';
+
+            const hasMigration = Object.keys(migrationPatch).length > 0;
+            const patch = { ...migrationPatch, ...cleanupPatch };
+            const hasChange = Object.keys(patch).length > 0;
+
+            if (!hasChange) continue;
+
             await repo.update({
               filterByTk: row.id,
               values: patch,
             });
-            if (beforeSize > 0) migratedCount += 1;
+            if (hasMigration) migratedCount += 1;
             cleanedCount += 1;
           }
           ctx.body = {
@@ -1284,18 +1307,37 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   private buildNormalizedValues(first: KkfileviewSettingsRecord) {
     const normalizedSaveValues = normalizeSettingsSaveValues({}, first);
     const serviceType = first.serviceType === 'basemetas' ? 'basemetas' : 'kkfileview';
-    const legacyHost = first.host || DEFAULT_KKFILEVIEW_HOST;
+    const legacyHost = String(first.host || '').trim();
     const preferredPreview = first.preferredPreview || (first.preferKkfileview === false ? 'microsoft' : serviceType);
+
+    // ── 第一步：确定新字段的最终值（新字段缺失时，先用旧字段迁移）──────────────
+    const kkfileviewHost = String(first.kkfileviewHost || '').trim()
+      || (serviceType === 'kkfileview' && legacyHost ? legacyHost : DEFAULT_KKFILEVIEW_HOST);
+    const basemetasHost = String(first.basemetasHost || '').trim()
+      || (serviceType === 'basemetas' && legacyHost ? legacyHost : DEFAULT_BASEMETAS_HOST);
+    const microsoftHost = String(first.microsoftHost || '').trim() || DEFAULT_MICROSOFT_HOST;
+    const kkfileviewExtensions = String(first.kkfileviewExtensions || '').trim()
+      || String(first.extensions || '').trim() || JSON.stringify(DEFAULT_EXTENSIONS);
+    const basemetasExtensions = String(first.basemetasExtensions || '').trim()
+      || String(first.extensions || '').trim() || JSON.stringify(DEFAULT_EXTENSIONS);
+    const microsoftExtensions = String(first.microsoftExtensions || '').trim()
+      || JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS);
+
+    // ── 第二步：新字段已有确定值后，才清空旧兼容字段 ───────────────────────────
+    // 只有当三个主机地址新字段均已填充时，才可以安全清空旧的 host 字段。
+    const canClearLegacyHost = !!(kkfileviewHost && basemetasHost && microsoftHost);
+    // 只有当扩展名新字段均已填充时，才可以安全清空旧的 extensions 字段。
+    const canClearLegacyExtensions = !!(kkfileviewExtensions && basemetasExtensions && microsoftExtensions);
+
     return {
-      host: first.host || DEFAULT_KKFILEVIEW_HOST,
-      kkfileviewHost: first.kkfileviewHost || (serviceType === 'kkfileview' ? legacyHost : DEFAULT_KKFILEVIEW_HOST),
-      basemetasHost: first.basemetasHost || (serviceType === 'basemetas' ? legacyHost : DEFAULT_BASEMETAS_HOST),
-      microsoftHost: first.microsoftHost || DEFAULT_MICROSOFT_HOST,
+      // 新字段（使用迁移后的确定值）
+      kkfileviewHost,
+      basemetasHost,
+      microsoftHost,
       nocobaseHost: String(normalizedSaveValues.nocobaseHost || ''),
-      extensions: first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
-      kkfileviewExtensions: first.kkfileviewExtensions || first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
-      basemetasExtensions: first.basemetasExtensions || first.extensions || JSON.stringify(DEFAULT_EXTENSIONS),
-      microsoftExtensions: first.microsoftExtensions || JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS),
+      kkfileviewExtensions,
+      basemetasExtensions,
+      microsoftExtensions,
       fileViewerAssetBase: String(normalizedSaveValues.fileViewerAssetBase || DEFAULT_FILE_VIEWER_ASSET_BASE),
       fileViewerExtensions: String(
         normalizedSaveValues.fileViewerExtensions || JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
@@ -1316,10 +1358,14 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       copyEmbedHtmlRoles: first.copyEmbedHtmlRoles || '[]',
       watermarkType: String(normalizedSaveValues.watermarkType || 'preview'),
       watermark: String(normalizedSaveValues.watermark || ''),
-      preferKkfileview: first.preferKkfileview ?? false,
       preferredPreview: ['microsoft', 'kkfileview', 'basemetas', 'none'].includes(preferredPreview)
         ? preferredPreview
         : DEFAULT_PREFERRED_PREVIEW,
+      // 旧兼容字段：新字段已确认有值后才清空，否则保留原值
+      host: canClearLegacyHost ? '' : (first.host || DEFAULT_KKFILEVIEW_HOST),
+      extensions: canClearLegacyExtensions ? '[]' : (first.extensions || JSON.stringify(DEFAULT_EXTENSIONS)),
+      preferKkfileview: false,   // preferredPreview 已覆盖此语义，可安全清零
+      serviceType: '',           // serviceType 已无实际读取路径，可安全清空
     };
   }
 

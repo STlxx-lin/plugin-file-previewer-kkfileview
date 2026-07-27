@@ -204,6 +204,46 @@ const getPreviewServiceLabel = (row: Record<string, unknown>) => {
     return '-';
 };
 
+const normalizeValueForCompare = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+    if (typeof value === 'number') return String(value);
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                return normalizeValueForCompare(parsed);
+            } catch {
+                // ignore
+            }
+        }
+        if (trimmed.includes(',')) {
+            const tokens = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+            return JSON.stringify(tokens.sort());
+        }
+        return trimmed;
+    }
+
+    if (Array.isArray(value)) {
+        const tokens = value
+            .map((item) => {
+                const str = String(item || '').trim();
+                if (str === '[]' || str === '""' || str === "''") return '';
+                return str;
+            })
+            .filter(Boolean);
+        return JSON.stringify(tokens.sort());
+    }
+
+    return JSON.stringify(value);
+};
+
+const areValuesEqual = (v1: unknown, v2: unknown): boolean => {
+    return normalizeValueForCompare(v1) === normalizeValueForCompare(v2);
+};
+
 const getChangedFieldNames = (
     payload: Record<string, unknown>,
     previous?: KkfileviewSettingsRecord
@@ -213,7 +253,7 @@ const getChangedFieldNames = (
     return keys.filter((key) => {
         const nextValue = payload[key];
         const prevValue = (previous as Record<string, unknown>)[key];
-        return JSON.stringify(nextValue) !== JSON.stringify(prevValue);
+        return !areValuesEqual(nextValue, prevValue);
     });
 };
 
@@ -224,6 +264,11 @@ const FIELD_LABEL_MAP: Record<string, string> = {
     microsoftHost: '微软在线服务地址',
     fileViewerAssetBase: 'File Viewer 资源基础路径',
     nocobaseHost: '系统公共访问地址',
+    extensions: '文件格式',
+    kkfileviewExtensions: 'kkFileView 文件格式',
+    basemetasExtensions: 'BaseMetas 文件格式',
+    microsoftExtensions: '微软在线文件格式',
+    fileViewerExtensions: 'File Viewer 文件格式',
     preferredPreview: '优先预览',
     basemetasRequestType: 'BaseMetas 请求类型',
     enableOpenInNewWindow: '新窗口按钮',
@@ -234,10 +279,15 @@ const FIELD_LABEL_MAP: Record<string, string> = {
     enableBasemetas: '启用 BaseMetas',
     enableMicrosoft: '启用微软在线',
     enableFileViewer: '启用 File Viewer',
-    fileViewerExtensions: 'File Viewer 文件格式',
     fileViewerLoadMode: 'File Viewer 默认加载模式',
     watermarkType: '水印类型',
     watermark: '水印内容',
+    watermarkOpacity: '水印透明度',
+    watermarkRotate: '水印旋转角度',
+    watermarkColor: '水印颜色',
+    enableCopyEmbedHtml: '启用嵌入代码复制',
+    copyEmbedHtmlPermission: '嵌入代码复制权限',
+    copyEmbedHtmlRoles: '允许复制嵌入代码的角色',
 };
 
 const formatFieldLabel = (key: string) => FIELD_LABEL_MAP[key] || key;
@@ -250,27 +300,36 @@ const toDisplayValue = (value: unknown) => {
     return String(value);
 };
 
-const buildSavedContentText = (
+const buildFullAuditSnapshot = (
     payload: Record<string, unknown>,
     changedFields: string[],
-    previous?: KkfileviewSettingsRecord
+    previous?: KkfileviewSettingsRecord,
+    activeRecord?: KkfileviewSettingsRecord
 ) => {
     const keys = changedFields.length > 0 ? changedFields : Object.keys(payload);
-    const lines = keys
-        .flatMap((key) => {
-            const label = formatFieldLabel(key);
-            const afterValue = toDisplayValue(payload[key]).trim() || '空';
-            const beforeRaw = previous ? toDisplayValue((previous as Record<string, unknown>)[key]).trim() : '';
-            const beforeValue = beforeRaw || '空';
-            return [
-                `${label}（修改前）: ${beforeValue}`,
-                `${label}（修改后）: ${afterValue}`,
-            ];
-        })
-        .filter(Boolean);
-    const text = lines.join(' | ');
-    if (!text) return '保存配置';
-    return text.length > 1000 ? `${text.slice(0, 1000)}...` : text;
+    const changes = keys.map((key) => {
+        const afterValue = toDisplayValue(payload[key]).trim();
+        const beforeValue = previous ? toDisplayValue((previous as Record<string, unknown>)[key]).trim() : '';
+        return {
+            field: key,
+            label: formatFieldLabel(key),
+            before: beforeValue || '空',
+            after: afterValue || '空',
+        };
+    });
+
+    return JSON.stringify(
+        {
+            action: 'UPDATE_SETTINGS',
+            timestamp: new Date().toISOString(),
+            changedCount: changedFields.length,
+            changedFields,
+            changes,
+            snapshot: activeRecord || payload,
+        },
+        null,
+        2
+    );
 };
 
 const normalizeRoleNames = (input: string | string[] = '') => {
@@ -378,7 +437,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
     const [deletingPreviewRecordKey, setDeletingPreviewRecordKey] = useState<string | null>(null);
     const [clearingPreviewRecords, setClearingPreviewRecords] = useState(false);
     const [cleanupLoading, setCleanupLoading] = useState(false);
-    const [cleanupMessage, setCleanupMessage] = useState('');
+    const [cleanupResult, setCleanupResult] = useState<{ migratedCount: number; cleanedCount: number; message: string; executedAt: string } | undefined>(undefined);
     const [watermarkDraft, setWatermarkDraft] = useState('');
     const [watermarkTypeDraft, setWatermarkTypeDraft] = useState<'global' | 'preview'>('preview');
     const [downloadingFileViewer, setDownloadingFileViewer] = useState(false);
@@ -584,11 +643,17 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 const time = formatLogTime(
                     row.updatedAt || row.createdAt || row.timestamp || row.time
                 );
+                const content = String(row.content || '').trim();
+                const changedFields = Array.isArray(row.changedFields)
+                    ? row.changedFields.map(f => String(f).trim()).filter(Boolean)
+                    : [];
                 return {
                     key: String(row.id || index),
                     time,
                     operator: getOperatorName(row),
                     change: getChangeSummary(row),
+                    content,
+                    changedFields,
                 };
             });
             setModificationRecords(records);
@@ -717,9 +782,16 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 method: 'post',
                 skipNotify: true,
             });
-            const result = (response as { data?: { data?: { message?: string } } })?.data?.data;
+            const result = (response as { data?: { data?: { migratedCount?: number; cleanedCount?: number; message?: string } } })?.data?.data;
+            const migratedCount = typeof result?.migratedCount === 'number' ? result.migratedCount : 0;
+            const cleanedCount = typeof result?.cleanedCount === 'number' ? result.cleanedCount : 0;
             const messageText = String(result?.message || '').trim() || t('Cleanup completed');
-            setCleanupMessage(messageText);
+            setCleanupResult({
+                migratedCount,
+                cleanedCount,
+                message: messageText,
+                executedAt: new Date().toLocaleString(),
+            });
             message.success(messageText);
             const refreshed = await api.request({
                 url: 'kkfileviewSettings:list',
@@ -728,7 +800,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             setSettingsRecords(extractSettingsRecords(refreshed));
         } catch {
             const messageText = t('Cleanup failed');
-            setCleanupMessage(messageText);
+            setCleanupResult(undefined);
             message.error(messageText);
         } finally {
             setCleanupLoading(false);
@@ -993,58 +1065,47 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             };
 
             const changedFields = getChangedFieldNames(payload, currentRecord);
-            const savedContent = buildSavedContentText(payload, changedFields, currentRecord);
 
-            let savedRecord: KkfileviewSettingsRecord | undefined;
-            if (currentRecord?.id) {
-                const response = await api.request({
-                    url: 'kkfileviewSettings:update',
-                    method: 'post',
-                    params: {
-                        filterByTk: currentRecord.id,
-                        filter: { id: currentRecord.id },
-                    },
-                    data: {
-                        filterByTk: currentRecord.id,
-                        filter: { id: currentRecord.id },
-                        ...payload,
-                    },
-                });
-                const records = extractSettingsRecords(response);
-                savedRecord = records[0];
-            } else {
-                const response = await api.request({
-                    url: 'kkfileviewSettings:create',
-                    method: 'post',
-                    data: payload,
-                });
-                const records = extractSettingsRecords(response);
-                savedRecord = records[0];
+            const response = await api.request({
+                url: 'kkfileviewSettingsSave:save',
+                method: 'post',
+                data: payload,
+            });
+            const records = extractSettingsRecords(response);
+            const savedRecord = records[0];
+
+            if (!savedRecord) {
+                throw new Error('Failed to save settings: empty response');
             }
 
-            const isDownloaded = Boolean(savedRecord?.fileViewerDownloaded ?? currentRecord?.fileViewerDownloaded);
+            const isDownloaded = Boolean(savedRecord.fileViewerDownloaded ?? currentRecord?.fileViewerDownloaded);
             const activeRecord: KkfileviewSettingsRecord = {
-                ...(savedRecord || { ...currentRecord, ...payload }),
+                ...savedRecord,
                 fileViewerDownloaded: isDownloaded,
             };
             setSettingsRecords([activeRecord]);
             updateConfigCache(activeRecord);
             void fetchSettingsData();
 
-            void api.request({
-                url: 'kkfileviewModificationRecords:append',
-                method: 'post',
-                data: {
-                    content: savedContent,
-                    timestamp: new Date().toISOString(),
-                },
-                skipNotify: true,
-            }).then(() => {
-                if (modificationLoaded) {
-                    void loadModificationRecords(true);
-                }
-            }).catch(() => {
-            });
+            if (changedFields.length > 0) {
+                const fullAuditContent = buildFullAuditSnapshot(payload, changedFields, currentRecord, activeRecord);
+                void api.request({
+                    url: 'kkfileviewModificationRecords:append',
+                    method: 'post',
+                    data: {
+                        summary: `修改了 ${changedFields.length} 项配置`,
+                        content: fullAuditContent,
+                        changedFields,
+                        timestamp: new Date().toISOString(),
+                    },
+                    skipNotify: true,
+                }).then(() => {
+                    if (modificationLoaded) {
+                        void loadModificationRecords(true);
+                    }
+                }).catch(() => {
+                });
+            }
 
             message.success(tr('Configuration saved successfully', '配置保存成功'));
         } catch (error: unknown) {
@@ -1113,7 +1174,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 t={t}
                 visible={activePanel === 'cleanup'}
                 loading={cleanupLoading}
-                message={cleanupMessage}
+                result={cleanupResult}
                 onRun={handleRunFieldCleanup}
             />
 

@@ -3,8 +3,8 @@
  * 旧版 `/admin` 入口强制使用 classic JSX runtime，避免开发态 `jsx-dev-runtime` 与旧后台 React 加载链路冲突。
  */
 import React, { useState } from 'react';
-import { AppstoreOutlined, SettingOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col, Progress } from 'antd';
+import { AppstoreOutlined, SettingOutlined, EyeOutlined, CopyOutlined, CheckOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Steps, Switch, Table, Typography, Tag, Tooltip, Row, Col, Progress, Statistic, Alert, Divider, Badge, Tabs, Descriptions } from 'antd';
 import type { FormInstance } from 'antd';
 import {
   DEFAULT_EXTENSIONS,
@@ -33,11 +33,21 @@ export type DownloadProgressState = {
   error?: string;
 };
 
+export type ChangeDetail = {
+  field: string;
+  fieldLabelKey: string;
+  before?: string;
+  after?: string;
+  raw?: string;
+};
+
 export type ModificationRecordItem = {
   key: string;
   time: string;
   operator: string;
   change: string;
+  content?: string;
+  changedFields?: string[];
 };
 
 export type PreviewRecordItem = {
@@ -48,49 +58,281 @@ export type PreviewRecordItem = {
   file: string;
 };
 
-const splitChangeItems = (value: string): string[] => {
-  return String(value || '')
-    .split('|')
-    .map((item) => item.trim())
-    .filter(Boolean);
+const CHINESE_LABEL_TO_KEY_MAP: Record<string, string> = {
+  '主机地址': 'host',
+  'kkFileView 主机地址': 'kkfileviewHost',
+  'BaseMetas 服务地址': 'basemetasHost',
+  '微软在线服务地址': 'microsoftHost',
+  'File Viewer 资源基础路径': 'fileViewerAssetBase',
+  '系统公共访问地址': 'nocobaseHost',
+  '文件格式': 'extensions',
+  'kkFileView 文件格式': 'kkfileviewExtensions',
+  'BaseMetas 文件格式': 'basemetasExtensions',
+  '微软在线文件格式': 'microsoftExtensions',
+  'File Viewer 文件格式': 'fileViewerExtensions',
+  '优先预览': 'preferredPreview',
+  'BaseMetas 请求类型': 'basemetasRequestType',
+  '新窗口按钮': 'enableOpenInNewWindow',
+  '新窗口按鈕': 'enableOpenInNewWindow',
+  '全屏按钮': 'enableFullscreenButton',
+  '全屏按鈕': 'enableFullscreenButton',
+  '移动端自动全屏': 'enableMobileAutoFullscreen',
+  '下载按钮': 'enableDownload',
+  '下载按鈕': 'enableDownload',
+  'File Viewer 默认加载模式': 'fileViewerLoadMode',
+  '启用 kkFileView': 'enableKkfileview',
+  '启用 BaseMetas': 'enableBasemetas',
+  '启用微软在线': 'enableMicrosoft',
+  '启用 File Viewer': 'enableFileViewer',
+  '水印类型': 'watermarkType',
+  '水印内容': 'watermark',
 };
 
-const CHANGE_FIELD_LABEL_MAP: Record<string, string> = {
-  host: '主机地址',
-  kkfileviewHost: 'kkFileView 主机地址',
-  basemetasHost: 'BaseMetas 服务地址',
-  microsoftHost: '微软在线服务地址',
-  fileViewerAssetBase: 'File Viewer 资源基础路径',
-  nocobaseHost: '系统公共访问地址',
-  extensions: '文件格式',
-  kkfileviewExtensions: 'kkFileView 文件格式',
-  basemetasExtensions: 'BaseMetas 文件格式',
-  microsoftExtensions: '微软在线文件格式',
-  fileViewerExtensions: 'File Viewer 文件格式',
-  preferredPreview: '优先预览',
-  basemetasRequestType: 'BaseMetas 请求类型',
-  enableOpenInNewWindow: '新窗口按鈕',
-  enableFullscreenButton: '全屏按鈕',
-  enableMobileAutoFullscreen: '移动端自动全屏',
-  enableDownload: '下载按鈕',
-  fileViewerLoadMode: 'File Viewer 默认加载模式',
-  enableKkfileview: '启用 kkFileView',
-  enableBasemetas: '启用 BaseMetas',
-  enableMicrosoft: '启用微软在线',
-  enableFileViewer: '启用 File Viewer',
-  watermarkType: '水印类型',
-  watermark: '水印内容',
+export const FIELD_KEY_TO_I18N_LABEL: Record<string, string> = {
+  host: 'kkFileView Server Address',
+  kkfileviewHost: 'kkFileView Server Address',
+  basemetasHost: 'BaseMetas Server Address',
+  microsoftHost: 'Microsoft Server Address',
+  fileViewerAssetBase: 'File Viewer Asset Base',
+  nocobaseHost: 'System Public Host Address',
+  extensions: 'Supported File Formats',
+  kkfileviewExtensions: 'kkFileView File Extensions',
+  basemetasExtensions: 'BaseMetas File Extensions',
+  microsoftExtensions: 'Microsoft File Extensions',
+  fileViewerExtensions: 'File Viewer File Extensions',
+  preferredPreview: 'Preferred Preview Engine',
+  basemetasRequestType: 'BaseMetas Request Type',
+  enableOpenInNewWindow: 'Enable Open In New Window Button',
+  enableFullscreenButton: 'Enable Fullscreen Button',
+  enableMobileAutoFullscreen: 'Enable Mobile Auto Fullscreen',
+  enableDownload: 'Enable File Download',
+  enableKkfileview: 'Enable kkFileView Engine',
+  enableBasemetas: 'Enable BaseMetas Engine',
+  enableMicrosoft: 'Enable Microsoft Engine',
+  enableFileViewer: 'Enable File Viewer Engine',
+  fileViewerLoadMode: 'File Viewer Default Load Mode',
+  watermarkType: 'Watermark Scope',
+  watermark: 'Watermark Content',
+  watermarkOpacity: 'Watermark Opacity',
+  watermarkRotate: 'Watermark Rotation Angle',
+  watermarkColor: 'Watermark Color',
+  copyEmbedHtmlPermission: 'Copy Embed HTML Permission',
+  copyEmbedHtmlRoles: 'Allowed Copy Roles',
+  enableCopyEmbedHtml: 'Enable Copy Embed HTML Button',
 };
 
-const toChineseChangeItem = (item: string): string => {
-  const text = String(item || '').trim();
-  if (!text) return '';
-  const index = text.indexOf(':');
-  if (index <= 0) return text;
-  const key = text.slice(0, index).trim();
-  const value = text.slice(index + 1).trim();
-  const label = CHANGE_FIELD_LABEL_MAP[key] || key;
-  return `${label}: ${value}`;
+export const FIELD_CATEGORY_MAP: Record<string, string> = {
+  host: 'kkFileView',
+  kkfileviewHost: 'kkFileView',
+  kkfileviewExtensions: 'kkFileView',
+  enableKkfileview: 'kkFileView',
+
+  basemetasHost: 'BaseMetas',
+  basemetasExtensions: 'BaseMetas',
+  basemetasRequestType: 'BaseMetas',
+  enableBasemetas: 'BaseMetas',
+
+  microsoftHost: 'Microsoft',
+  microsoftExtensions: 'Microsoft',
+  enableMicrosoft: 'Microsoft',
+
+  fileViewerAssetBase: 'File Viewer',
+  fileViewerExtensions: 'File Viewer',
+  fileViewerLoadMode: 'File Viewer',
+  enableFileViewer: 'File Viewer',
+
+  preferredPreview: 'Global',
+  nocobaseHost: 'Global',
+  enableOpenInNewWindow: 'UI & Features',
+  enableFullscreenButton: 'UI & Features',
+  enableMobileAutoFullscreen: 'UI & Features',
+  enableDownload: 'UI & Features',
+  enableCopyEmbedHtml: 'UI & Features',
+  copyEmbedHtmlPermission: 'Permissions',
+  copyEmbedHtmlRoles: 'Permissions',
+
+  watermarkType: 'Watermark',
+  watermark: 'Watermark',
+  watermarkOpacity: 'Watermark',
+  watermarkRotate: 'Watermark',
+  watermarkColor: 'Watermark',
+};
+
+export const getFieldCategoryLabel = (rawKeyOrLabel: string, t: Translation): string => {
+  const raw = String(rawKeyOrLabel || '').trim();
+  const normalizedKey = CHINESE_LABEL_TO_KEY_MAP[raw] || raw;
+  const category = FIELD_CATEGORY_MAP[normalizedKey] || 'General';
+  return t(category);
+};
+
+export const truncateValue = (val?: string, maxLen = 14): string => {
+  const text = String(val || '').trim();
+  if (!text) return '空';
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}...`;
+};
+
+export const formatFriendlyValue = (val: string | undefined, field: string | undefined, t: Translation) => {
+  if (val === undefined || val === null) {
+    return <Typography.Text type="secondary">-</Typography.Text>;
+  }
+  const text = String(val).trim();
+  if (!text || text === '空') {
+    return <Tag style={{ color: '#8c8c8c', background: '#f5f5f5', borderColor: '#d9d9d9' }}>{t('Empty')}</Tag>;
+  }
+
+  if (text === 'true') {
+    return <Tag color="success">🟢 {t('Enabled')}</Tag>;
+  }
+  if (text === 'false') {
+    return <Tag color="default">🔴 {t('Disabled')}</Tag>;
+  }
+
+  if (field && (field.includes('Extensions') || field === 'extensions')) {
+    let tokens: string[] = [];
+    if (text.startsWith('[') && text.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) tokens = parsed.map(s => String(s).trim()).filter(Boolean);
+      } catch {}
+    }
+    if (tokens.length === 0) {
+      tokens = text.split(/[,,\s]+/).map(s => s.trim()).filter(Boolean);
+    }
+    if (tokens.length > 0) {
+      return (
+        <Space size={4} wrap>
+          {tokens.map(token => (
+            <Tag key={token} color="blue" style={{ fontFamily: 'monospace' }}>{token}</Tag>
+          ))}
+        </Space>
+      );
+    }
+  }
+
+  return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>{text}</span>;
+};
+
+export const getTranslatedFieldLabel = (rawKeyOrLabel: string, t: Translation): string => {
+  const raw = String(rawKeyOrLabel || '').trim();
+  if (!raw) return '-';
+  const normalizedKey = CHINESE_LABEL_TO_KEY_MAP[raw] || raw;
+  const i18nKey = FIELD_KEY_TO_I18N_LABEL[normalizedKey];
+  if (i18nKey) {
+    return t(i18nKey);
+  }
+  const directTrans = t(normalizedKey);
+  if (directTrans && directTrans !== normalizedKey) {
+    return directTrans;
+  }
+  return raw;
+};
+
+export const parseChangeDetails = (
+  content?: string,
+  change?: string,
+  changedFields?: string[]
+): ChangeDetail[] => {
+  const rawContent = String(content || '').trim();
+
+  const normalizeTextForFilter = (val?: string): string => {
+    const s = String(val || '').trim();
+    if (!s || s === '空' || s === '[]' || s === '""' || s === "''") return '';
+    if (s.includes(',')) {
+      return s.split(',').map((x) => x.trim()).filter(Boolean).sort().join(',');
+    }
+    return s;
+  };
+
+  const filterPseudoChanges = (items: ChangeDetail[]): ChangeDetail[] => {
+    return items.filter((item) => {
+      if (item.before !== undefined && item.after !== undefined) {
+        const nb = normalizeTextForFilter(item.before);
+        const na = normalizeTextForFilter(item.after);
+        if (nb === na) return false;
+      }
+      return true;
+    });
+  };
+
+  // 1. 结构化 JSON 格式解析（支持数组或包含 changes 属性的对象）
+  let resultList: ChangeDetail[] = [];
+  if ((rawContent.startsWith('[') && rawContent.endsWith(']')) || (rawContent.startsWith('{') && rawContent.endsWith('}'))) {
+    try {
+      const parsed = JSON.parse(rawContent);
+      const items = Array.isArray(parsed)
+        ? parsed
+        : (Array.isArray(parsed?.changes) ? parsed.changes : []);
+      if (items.length > 0) {
+        resultList = items.map((item: any) => ({
+          field: String(item.field || item.key || ''),
+          fieldLabelKey: String(item.field || item.key || item.label || ''),
+          before: item.before !== undefined ? String(item.before) : undefined,
+          after: item.after !== undefined ? String(item.after) : undefined,
+          raw: item.raw ? String(item.raw) : undefined,
+        }));
+        return filterPseudoChanges(resultList);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. 文本解析: "label（修改前）: A | label（修改后）: B" 格式或冒号分隔格式
+  const rawText = rawContent || String(change || '').trim();
+  if (rawText) {
+    const parts = rawText.split('|').map((s) => s.trim()).filter(Boolean);
+    const beforeMap = new Map<string, string>();
+    const afterMap = new Map<string, string>();
+    const unparsed: string[] = [];
+
+    for (const part of parts) {
+      const beforeMatch = part.match(/^(.*?)（修改前）\s*:\s*(.*)$/);
+      const afterMatch = part.match(/^(.*?)（修改后）\s*:\s*(.*)$/);
+      if (beforeMatch) {
+        beforeMap.set(beforeMatch[1].trim(), beforeMatch[2].trim());
+      } else if (afterMatch) {
+        afterMap.set(afterMatch[1].trim(), afterMatch[2].trim());
+      } else {
+        unparsed.push(part);
+      }
+    }
+
+    const allKeys = Array.from(new Set([...beforeMap.keys(), ...afterMap.keys()]));
+    if (allKeys.length > 0) {
+      resultList = allKeys.map((k) => ({
+        field: k,
+        fieldLabelKey: k,
+        before: beforeMap.get(k),
+        after: afterMap.get(k),
+      }));
+      return filterPseudoChanges(resultList);
+    }
+
+    if (parts.length > 0) {
+      resultList = parts.map((part) => {
+        const idx = part.indexOf(':');
+        if (idx > 0) {
+          const k = part.slice(0, idx).trim();
+          const v = part.slice(idx + 1).trim();
+          return { field: k, fieldLabelKey: k, after: v, raw: part };
+        }
+        return { field: part, fieldLabelKey: part, raw: part };
+      });
+      return filterPseudoChanges(resultList);
+    }
+  }
+
+  // 3. 回退到 changedFields 数组
+  if (Array.isArray(changedFields) && changedFields.length > 0) {
+    resultList = changedFields.map((f) => ({
+      field: String(f).trim(),
+      fieldLabelKey: String(f).trim(),
+    }));
+    return filterPseudoChanges(resultList);
+  }
+
+  return [];
 };
 
 type ToolbarProps = {
@@ -170,9 +412,16 @@ type PreviewHistoryProps = {
   visible: boolean;
 };
 
+type CleanupResult = {
+  migratedCount: number;
+  cleanedCount: number;
+  message: string;
+  executedAt: string; // ISO 时间字符串
+};
+
 type CleanupProps = {
   loading: boolean;
-  message?: string;
+  result?: CleanupResult;
   onRun: () => void;
   t: Translation;
   visible: boolean;
@@ -957,98 +1206,329 @@ export const ModificationRecordsCard = ({
     const translated = t(key);
     return translated === key ? fallback : translated;
   };
+
+  const [detailModalRecord, setDetailModalRecord] = useState<ModificationRecordItem | null>(null);
+  const [copiedRawJson, setCopiedRawJson] = useState(false);
+
+  const handleCopyJson = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedRawJson(true);
+      setTimeout(() => setCopiedRawJson(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
-  <Card
-    bordered={false}
-    title={t('Modification Records')}
-    extra={(
-      <Space>
-        <Popconfirm
-          title={tr('Confirm clear all records?', '确认清空全部记录吗？')}
-          onConfirm={onClear}
-          okText={tr('Confirm', '确认')}
-          cancelText={t('Cancel')}
-        >
-          <Button danger loading={clearing}>{tr('Clear Records', '清空记录')}</Button>
-        </Popconfirm>
-        <Button onClick={onRefresh} loading={loading}>{t('Refresh')}</Button>
-      </Space>
-    )}
-    style={{ marginTop: 16, display: visible ? 'block' : 'none' }}
-  >
-    <Table<ModificationRecordItem>
-      rowKey="key"
-      loading={loading}
-      dataSource={records}
-      pagination={{ pageSize: 10, showSizeChanger: false }}
-      locale={{ emptyText: t('No modification records found') }}
-      columns={[
-        {
-          title: t('Time'),
-          dataIndex: 'time',
-          key: 'time',
-          width: 220,
-        },
-        {
-          title: t('Operator'),
-          dataIndex: 'operator',
-          key: 'operator',
-          width: 180,
-        },
-        {
-          title: t('Changed Item'),
-          dataIndex: 'change',
-          key: 'change',
-          render: (value: string) => {
-            const items = splitChangeItems(value).map(toChineseChangeItem).filter(Boolean);
-            const previewItems = items.slice(0, 3);
-            const hiddenCount = Math.max(0, items.length - previewItems.length);
-            const fullText = items.join('\n');
-            if (items.length === 0) {
-              return <Typography.Text type="secondary">-</Typography.Text>;
-            }
-            return (
-              <Tooltip title={<span style={{ whiteSpace: 'pre-wrap' }}>{fullText}</span>}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: '100%' }}>
-                  {previewItems.map((item, index) => (
-                    <Tag key={`${item}-${index}`} style={{ marginInlineEnd: 0 }}>
-                      {item}
-                    </Tag>
-                  ))}
-                  {hiddenCount > 0 ? (
-                    <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-                      +{hiddenCount}
-                    </Tag>
-                  ) : null}
-                </div>
-              </Tooltip>
-            );
+    <Card
+      bordered={false}
+      title={t('Modification Records')}
+      extra={(
+        <Space>
+          <Popconfirm
+            title={tr('Confirm clear all records?', '确认清空全部记录吗？')}
+            onConfirm={onClear}
+            okText={tr('Confirm', '确认')}
+            cancelText={t('Cancel')}
+          >
+            <Button danger loading={clearing}>{tr('Clear Records', '清空记录')}</Button>
+          </Popconfirm>
+          <Button onClick={onRefresh} loading={loading}>{t('Refresh')}</Button>
+        </Space>
+      )}
+      style={{ marginTop: 16, display: visible ? 'block' : 'none' }}
+    >
+      <Table<ModificationRecordItem>
+        rowKey="key"
+        loading={loading}
+        dataSource={records}
+        pagination={{ pageSize: 10, showSizeChanger: false }}
+        locale={{ emptyText: t('No modification records found') }}
+        columns={[
+          {
+            title: t('Time'),
+            dataIndex: 'time',
+            key: 'time',
+            width: 180,
           },
-        },
-        {
-          title: tr('Actions', '操作'),
-          key: 'actions',
-          width: 120,
-          render: (_, record) => (
-            <Popconfirm
-              title={tr('Confirm delete this record?', '确认删除这条记录吗？')}
-              onConfirm={() => onDelete(record.key)}
-              okText={tr('Confirm', '确认')}
-              cancelText={t('Cancel')}
-            >
-              <Button
+          {
+            title: t('Operator'),
+            dataIndex: 'operator',
+            key: 'operator',
+            width: 150,
+          },
+          {
+            title: tr('Changed Details', '变更明细'),
+            key: 'changeDetails',
+            render: (_, record) => {
+              const details = parseChangeDetails(record.content, record.change, record.changedFields);
+              if (details.length === 0) {
+                return <Typography.Text type="secondary">-</Typography.Text>;
+              }
+
+              const categories = Array.from(
+                new Set(details.map((item) => getFieldCategoryLabel(item.fieldLabelKey || item.field, t)))
+              );
+
+              const displayItems = details.slice(0, 2);
+              const extraCount = details.length - displayItems.length;
+
+              const fullTooltipText = details
+                .map((item) => {
+                  const cat = getFieldCategoryLabel(item.fieldLabelKey || item.field, t);
+                  const label = getTranslatedFieldLabel(item.fieldLabelKey || item.field, t);
+                  if (item.before !== undefined && item.after !== undefined) {
+                    return `[${cat}] ${label} (${item.field}): ${item.before} ➔ ${item.after}`;
+                  }
+                  return `[${cat}] ${label} (${item.field}): ${item.after || item.raw || '-'}`;
+                })
+                .join('\n');
+
+              return (
+                <Tooltip title={<div style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>{fullTooltipText}</div>}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '100%' }}>
+                    {/* 模块分类展示行 */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#8c8c8c', marginRight: 2 }}>{t('Module')}:</span>
+                      {categories.map((cat) => (
+                        <Tag color="purple" key={cat} style={{ marginInlineEnd: 0, fontWeight: 600, fontSize: 12 }}>
+                          {cat}
+                        </Tag>
+                      ))}
+                    </div>
+
+                    {/* 变更字段与对比展示行 */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      {displayItems.map((item, idx) => {
+                        const label = getTranslatedFieldLabel(item.fieldLabelKey || item.field, t);
+                        if (item.before !== undefined && item.after !== undefined) {
+                          const shortBefore = truncateValue(item.before, 10);
+                          const shortAfter = truncateValue(item.after, 10);
+                          return (
+                            <Tag color="blue" key={idx} style={{ marginInlineEnd: 0, padding: '1px 6px' }}>
+                              <span>{label}:</span>{' '}
+                              <span style={{ textDecoration: 'line-through', opacity: 0.65, marginRight: 2 }}>{shortBefore}</span>
+                              ➔{' '}
+                              <span style={{ fontWeight: 600, color: '#1677ff', marginLeft: 2 }}>{shortAfter}</span>
+                            </Tag>
+                          );
+                        }
+                        if (item.after !== undefined) {
+                          return (
+                            <Tag color="cyan" key={idx} style={{ marginInlineEnd: 0, padding: '1px 6px' }}>
+                              <span>{label}:</span> {truncateValue(item.after, 12)}
+                            </Tag>
+                          );
+                        }
+                        return (
+                          <Tag color="geekblue" key={idx} style={{ marginInlineEnd: 0, padding: '1px 6px' }}>
+                            {label}
+                          </Tag>
+                        );
+                      })}
+                      {extraCount > 0 && (
+                        <Tag
+                          color="default"
+                          style={{ marginInlineEnd: 0, cursor: 'pointer' }}
+                          onClick={() => setDetailModalRecord(record)}
+                        >
+                          +{extraCount} {tr('more items', '项')}
+                        </Tag>
+                      )}
+                    </div>
+                  </div>
+                </Tooltip>
+              );
+            },
+          },
+          {
+            title: tr('Actions', '操作'),
+            key: 'actions',
+            width: 160,
+            render: (_, record) => (
+              <Space size="small">
+                <Button
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => setDetailModalRecord(record)}
+                >
+                  {tr('Details', '详情')}
+                </Button>
+                <Popconfirm
+                  title={tr('Confirm delete this record?', '确认删除这条记录吗？')}
+                  onConfirm={() => onDelete(record.key)}
+                  okText={tr('Confirm', '确认')}
+                  cancelText={t('Cancel')}
+                >
+                  <Button
+                    size="small"
+                    danger
+                    loading={deletingKey === record.key}
+                  >
+                    {tr('Delete', '删除')}
+                  </Button>
+                </Popconfirm>
+              </Space>
+            ),
+          },
+        ]}
+      />
+
+      {/* 修改记录详情 Modal */}
+      <Modal
+        open={!!detailModalRecord}
+        title={
+          <Space>
+            <EyeOutlined style={{ color: '#1677ff' }} />
+            <span>{tr('Modification Record Details', '修改记录详情')}</span>
+          </Space>
+        }
+        onCancel={() => setDetailModalRecord(null)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setDetailModalRecord(null)}>
+            {tr('Close', '关闭')}
+          </Button>,
+        ]}
+        width={760}
+      >
+        {detailModalRecord && (() => {
+          const details = parseChangeDetails(detailModalRecord.content, detailModalRecord.change, detailModalRecord.changedFields);
+          const rawJsonString = (() => {
+            const text = String(detailModalRecord.content || '').trim();
+            if (text.startsWith('{') || text.startsWith('[')) {
+              try {
+                return JSON.stringify(JSON.parse(text), null, 2);
+              } catch {
+                // ignore
+              }
+            }
+            return JSON.stringify(
+              {
+                recordId: detailModalRecord.key,
+                operator: detailModalRecord.operator,
+                time: detailModalRecord.time,
+                changedCount: details.length,
+                changes: details,
+              },
+              null,
+              2
+            );
+          })();
+
+          return (
+            <div style={{ paddingTop: 8 }}>
+              {/* 元数据简报 */}
+              <Descriptions
+                bordered
                 size="small"
-                danger
-                loading={deletingKey === record.key}
+                column={2}
+                style={{ marginBottom: 16 }}
               >
-                {tr('Delete', '删除')}
-              </Button>
-            </Popconfirm>
-          ),
-        },
-      ]}
-    />
-  </Card>
+                <Descriptions.Item label={tr('Record ID', '记录 ID')}>
+                  <Tag color="default">#{detailModalRecord.key}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('Operator')}>
+                  <Typography.Text strong>{detailModalRecord.operator}</Typography.Text>
+                </Descriptions.Item>
+                <Descriptions.Item label={t('Time')}>
+                  {detailModalRecord.time}
+                </Descriptions.Item>
+                <Descriptions.Item label={tr('Total Changes', '受影响字段')}>
+                  <Badge count={`${details.length} ${tr('fields', '项')}`} overflowCount={999} style={{ backgroundColor: '#52c41a' }} />
+                </Descriptions.Item>
+              </Descriptions>
+
+              {/* Tabs 呈现结构化明细与 RAW 审计视图 */}
+              <Tabs
+                defaultActiveKey="diff"
+                items={[
+                  {
+                    key: 'diff',
+                    label: tr('Field Changes Table', '结构化变更明细'),
+                    children: (
+                      <Table<ChangeDetail>
+                        rowKey={(item, index) => `${item.field}-${index}`}
+                        pagination={false}
+                        bordered
+                        size="small"
+                        dataSource={details}
+                        columns={[
+                          {
+                            title: tr('Module', '模块分类'),
+                            key: 'category',
+                            width: 140,
+                            render: (_, item) => (
+                              <Tag color="orange" style={{ fontWeight: 600 }}>
+                                {getFieldCategoryLabel(item.fieldLabelKey || item.field, t)}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            title: tr('Changed Field', '变更字段'),
+                            dataIndex: 'fieldLabelKey',
+                            width: 210,
+                            render: (val, item) => (
+                              <Space direction="vertical" size={2}>
+                                <Typography.Text strong style={{ fontSize: 13, color: '#1f1f1f' }}>
+                                  {getTranslatedFieldLabel(val || item.field, t)}
+                                </Typography.Text>
+                                <Tag color="cyan" style={{ fontFamily: 'monospace', marginInlineEnd: 0, fontSize: 11 }}>
+                                  {item.field}
+                                </Tag>
+                              </Space>
+                            ),
+                          },
+                          {
+                            title: tr('Value Before', '修改前数值'),
+                            dataIndex: 'before',
+                            width: 180,
+                            render: (val, item) => formatFriendlyValue(val, item.field, t),
+                          },
+                          {
+                            title: tr('Value After', '修改后数值'),
+                            dataIndex: 'after',
+                            render: (val, item) => formatFriendlyValue(val !== undefined ? val : item.raw, item.field, t),
+                          },
+                        ]}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'raw',
+                    label: tr('Audit Snapshot (JSON)', '原始审计快照'),
+                    children: (
+                      <div style={{ position: 'relative' }}>
+                        <Button
+                          size="small"
+                          icon={copiedRawJson ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+                          style={{ position: 'absolute', top: 8, right: 8, zIndex: 10 }}
+                          onClick={() => void handleCopyJson(rawJsonString)}
+                        >
+                          {copiedRawJson ? tr('Copied', '已复制') : tr('Copy RAW', '复制原始 JSON')}
+                        </Button>
+                        <pre style={{
+                          background: '#282c34',
+                          color: '#abb2bf',
+                          padding: 12,
+                          borderRadius: 6,
+                          fontSize: 12,
+                          maxHeight: 300,
+                          overflow: 'auto',
+                          fontFamily: 'Consolas, Monaco, monospace',
+                        }}>
+                          {rawJsonString}
+                        </pre>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          );
+        })()}
+      </Modal>
+    </Card>
   );
 };
 
@@ -1138,9 +1618,17 @@ export const PreviewRecordsCard = ({
   </Card>
 );
 
+/** 旧版兼容字段列表：用于展示每次迁移涉及的字段和其替代字段 */
+const LEGACY_FIELD_ROWS = [
+  { legacy: 'host',             newFields: 'kkfileviewHost, basemetasHost',                              desc: 'desc.host' },
+  { legacy: 'extensions',       newFields: 'kkfileviewExtensions, basemetasExtensions, microsoftExtensions', desc: 'desc.extensions' },
+  { legacy: 'preferKkfileview', newFields: 'preferredPreview',                                          desc: 'desc.preferKkfileview' },
+  { legacy: 'serviceType',      newFields: 'preferredPreview, enableBasemetas',                         desc: 'desc.serviceType' },
+];
+
 export const FieldCleanupCard = ({
   loading,
-  message,
+  result,
   onRun,
   t,
   visible,
@@ -1151,9 +1639,97 @@ export const FieldCleanupCard = ({
     extra={<Button type="primary" loading={loading} onClick={onRun}>{t('Run Cleanup')}</Button>}
     style={{ marginTop: 16, display: visible ? 'block' : 'none' }}
   >
-    <Typography.Paragraph>
-      {t('Migrate legacy fields to new fields when missing, then clear legacy compatibility fields.')}
-    </Typography.Paragraph>
-    <Typography.Text type="secondary">{message || t('Not executed yet')}</Typography.Text>
+    {/* 功能说明 */}
+    <Alert
+      type="info"
+      showIcon
+      message={t('Field Cleanup Description')}
+      description={t('Migrate legacy fields to new fields when missing, then clear legacy compatibility fields.')}
+      style={{ marginBottom: 16 }}
+    />
+
+    {/* 执行结果统计 */}
+    {result ? (
+      <>
+        <Divider orientation="left" style={{ fontSize: 13, color: '#666' }}>
+          {t('Last Execution Result')} &nbsp;
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {result.executedAt}
+          </Typography.Text>
+        </Divider>
+        <Row gutter={24} style={{ marginBottom: 16 }}>
+          <Col span={8}>
+            <Card size="small" bordered style={{ textAlign: 'center', background: '#f6ffed', borderColor: '#b7eb8f' }}>
+              <Statistic
+                title={<span style={{ color: '#389e0d', fontWeight: 600 }}>{t('Migrated Records')}</span>}
+                value={result.migratedCount}
+                suffix={t('records')}
+                valueStyle={{ color: '#389e0d', fontSize: 28 }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" bordered style={{ textAlign: 'center', background: '#e6f4ff', borderColor: '#91caff' }}>
+              <Statistic
+                title={<span style={{ color: '#0958d9', fontWeight: 600 }}>{t('Cleaned Records')}</span>}
+                value={result.cleanedCount}
+                suffix={t('records')}
+                valueStyle={{ color: '#0958d9', fontSize: 28 }}
+              />
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small" bordered style={{ textAlign: 'center', background: result.migratedCount === 0 && result.cleanedCount === 0 ? '#fffbe6' : '#f9f9f9', borderColor: result.migratedCount === 0 && result.cleanedCount === 0 ? '#ffe58f' : '#d9d9d9' }}>
+              <Statistic
+                title={<span style={{ fontWeight: 600 }}>{t('Status')}</span>}
+                value={result.migratedCount === 0 && result.cleanedCount === 0 ? t('Already Clean') : t('Cleanup Done')}
+                valueStyle={{
+                  fontSize: 16,
+                  color: result.migratedCount === 0 && result.cleanedCount === 0 ? '#d48806' : '#52c41a',
+                }}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </>
+    ) : (
+      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+        <Badge status="default" />&nbsp;{t('Not executed yet')}
+      </Typography.Text>
+    )}
+
+    {/* 旧字段 → 新字段映射说明表 */}
+    <Divider orientation="left" style={{ fontSize: 13, color: '#666' }}>{t('Legacy Field Mapping')}</Divider>
+    <Table
+      size="small"
+      rowKey="legacy"
+      pagination={false}
+      bordered
+      dataSource={LEGACY_FIELD_ROWS}
+      columns={[
+        {
+          title: t('Legacy Field'),
+          dataIndex: 'legacy',
+          width: 160,
+          render: (val: string) => <Tag color="warning" style={{ fontFamily: 'monospace' }}>{val}</Tag>,
+        },
+        {
+          title: t('Migrated To'),
+          dataIndex: 'newFields',
+          render: (val: string) => (
+            <Space size={4} wrap>
+              {val.split(',').map((f) => (
+                <Tag key={f.trim()} color="success" style={{ fontFamily: 'monospace' }}>{f.trim()}</Tag>
+              ))}
+            </Space>
+          ),
+        },
+        {
+          title: t('Description'),
+          dataIndex: 'desc',
+          render: (val: string) => <Typography.Text type="secondary">{t(val)}</Typography.Text>,
+        },
+      ]}
+    />
   </Card>
 );
