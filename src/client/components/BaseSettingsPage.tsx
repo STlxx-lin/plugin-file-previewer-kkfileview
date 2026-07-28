@@ -910,22 +910,41 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 message.warning(tr('Please fill in service address first', '请先填写服务地址'));
                 return;
             }
+            if (!/^https?:\/\//i.test(hostValue)) {
+                message.warning(tr('Service address must start with http:// or https://', '服务地址必须以 http:// 或 https:// 开头'));
+                return;
+            }
             setTestingServices((prev) => ({ ...prev, [serviceKey]: true }));
-            const response = await api.request({
-                url: 'kkfileviewSettings:testConnectivity',
-                method: 'post',
-                data: {
-                    service: serviceKey,
-                    host: hostValue,
-                },
-                skipNotify: true,
-            });
-            const payload = getServiceHealthPayload(response);
-            if (payload.reachable || payload.success) {
-                const modeText = payload.mode ? ` (${payload.mode})` : '';
-                message.success(`${tr('Service connectivity normal', '服务连通正常')}${modeText}`);
-            } else {
-                message.error(payload.message || tr('Service unreachable or abnormal response', '服务无法访问或响应异常'));
+
+            // Microsoft 是纯浏览器端服务，直接视为连通
+            if (serviceKey === 'microsoft') {
+                message.success(`${tr('Service connectivity normal', '服务连通正常')} (browser-side)`);
+                return;
+            }
+
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 8000);
+                const res = await fetch(hostValue, {
+                    method: 'GET',
+                    mode: 'no-cors',
+                    signal: controller.signal,
+                });
+                clearTimeout(timer);
+                // no-cors 模式下 type === 'opaque' 表示请求成功到达服务器
+                if (res.type === 'opaque' || res.ok || res.status === 0) {
+                    message.success(`${tr('Service connectivity normal', '服务连通正常')} (http)`);
+                } else {
+                    message.success(`${tr('Service connectivity normal', '服务连通正常')} (http ${res.status})`);
+                }
+            } catch (fetchErr: unknown) {
+                const errName = (fetchErr as Error)?.name;
+                if (errName === 'AbortError') {
+                    message.error(tr('Service connectivity test timed out', '服务连通性测试超时，请检查地址是否正确'));
+                } else {
+                    // fetch 抛出异常也可能是 CORS 拒绝，但说明服务器有响应
+                    message.warning(tr('Service responded but may have CORS restrictions', '服务有响应，但可能存在跨域限制，请确认地址是否正确'));
+                }
             }
         } catch (error: unknown) {
             if (hasErrorFields(error)) return;

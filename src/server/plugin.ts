@@ -1066,7 +1066,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       actions: {
         async check(ctx: ActionContext) {
           const values = getActionValues(ctx);
-          const target = String(values.url || '').trim();
+          const target = String(values.url || values.host || '').trim();
           const service = String(values.service || '').trim();
           const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
           if (!isAdminUser(currentUser)) {
@@ -1119,39 +1119,40 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           try {
             const url = new URL(target);
             const host = url.hostname;
-            const pingReachable = await pingHost(host, 3000);
-            if (!pingReachable) {
-              const port = Number(url.port || (url.protocol === 'https:' ? '443' : '80'));
-              const tcpReachable = await tcpConnect(host, port, 3000);
-              if (tcpReachable) {
-                ctx.body = {
-                  data: {
-                    success: true,
-                    reachable: true,
-                    mode: 'tcp',
-                    host,
-                    port,
-                  },
-                };
-                return;
-              }
-              ctx.status = 502;
+            const port = Number(url.port || (url.protocol === 'https:' ? '443' : '80'));
+            const tcpReachable = await tcpConnect(host, port, 3000);
+            if (tcpReachable) {
               ctx.body = {
                 data: {
-                  success: false,
-                  reachable: false,
-                  message: 'ping-failed',
+                  success: true,
+                  reachable: true,
+                  mode: 'tcp',
+                  host,
+                  port,
+                },
+              };
+              return;
+            }
+            const pingReachable = await pingHost(host, 3000);
+            if (pingReachable) {
+              ctx.body = {
+                data: {
+                  success: true,
+                  reachable: true,
+                  mode: 'ping',
                   host,
                 },
               };
               return;
             }
+            ctx.status = 502;
             ctx.body = {
               data: {
-                success: true,
-                reachable: true,
-                mode: 'ping',
+                success: false,
+                reachable: false,
+                message: 'unreachable',
                 host,
+                port,
               },
             };
           } catch {
@@ -1160,7 +1161,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
               data: {
                 success: false,
                 reachable: false,
-                message: 'ping-failed',
+                message: 'check-failed',
               },
             };
           }
@@ -1226,19 +1227,11 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     return roleTokens.some((token) => token === 'admin' || token === 'root' || token.includes('admin'));
   }
 
-  private isAllowedHealthCheckTarget(target: string, service: string, settings: HealthCheckSettings): boolean {
+  private isAllowedHealthCheckTarget(target: string, _service: string, _settings: HealthCheckSettings): boolean {
     if (!/^https?:\/\//i.test(target)) return false;
-    const serviceHostMap: Record<string, string> = {
-      kkfileview: settings?.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST,
-      basemetas: settings?.basemetasHost || DEFAULT_BASEMETAS_HOST,
-      microsoft: settings?.microsoftHost || DEFAULT_MICROSOFT_HOST,
-    };
-    const allowedHost = serviceHostMap[service];
-    if (!allowedHost) return false;
     try {
-      const targetUrl = new URL(target);
-      const allowedUrl = new URL(allowedHost);
-      return targetUrl.origin === allowedUrl.origin;
+      const parsed = new URL(target);
+      return Boolean(parsed.hostname);
     } catch {
       return false;
     }
