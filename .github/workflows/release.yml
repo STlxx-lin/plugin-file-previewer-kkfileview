@@ -18,33 +18,48 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          path: plugin-src
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'yarn'
+
+      - name: Clone NocoBase Core
+        run: |
+          git clone --depth 1 https://github.com/nocobase/nocobase.git -b main nocobase-core
+
+      - name: Move Plugin to NocoBase Core
+        run: |
+          mkdir -p nocobase-core/packages/plugins/@nocobase
+          mv plugin-src nocobase-core/packages/plugins/@nocobase/plugin-file-previewer-kkfileview
 
       - name: Install Dependencies
-        run: yarn install || npm install
-
-      - name: Build Plugin
         run: |
-          npm run build || npx nocobase build || echo "Build step finished."
+          cd nocobase-core
+          yarn install
 
       - name: Get Plugin Version
         id: plugin_version
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(node -p "require('./nocobase-core/packages/plugins/@nocobase/plugin-file-previewer-kkfileview/package.json').version")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "RELEASE_VERSION=${VERSION}" >> $GITHUB_ENV
           mkdir -p /tmp/release-artifacts
 
-      - name: Package Light Version (轻量版 - 无内置静态资产)
+      - name: Build & Package Light Version (轻量版 - 无内置静态资产)
         run: |
+          cd nocobase-core
+          BUILD_FULL=false yarn build @nocobase/plugin-file-previewer-kkfileview
+          
+          cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
+          
           # 清理本地可能存在的静态资产
           rm -rf public/file-viewer
           
-          # 打包轻量版 tgz 与 zip（排除 src 开发源码及测试脚本，只保留构建产物 dist）
+          # 打包轻量版 tgz 与 zip（排除 src 源码，保留构建产物 dist 与 scripts）
           tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
@@ -52,21 +67,31 @@ jobs:
             --exclude="storage" \
             --exclude="docs" \
             --exclude="src" \
-            --exclude="scripts" \
             *
             
           zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}.zip" * \
-            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "src/*" "scripts/*"
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "src/*"
 
-      - name: Package Full Version (完整版 - 内置 File Viewer 离线资产)
+      - name: Build & Package Full Version (完整版 - 内置 File Viewer 离线资产)
         run: |
-          # 提取 node_modules 中的离线静态资产到 public/file-viewer
-          mkdir -p public/file-viewer
-          if [ -d "node_modules/@file-viewer/web-full" ]; then
-            cp -r node_modules/@file-viewer/web-full/* public/file-viewer/ || true
-          fi
+          cd nocobase-core/packages/plugins/@nocobase/plugin-file-previewer-kkfileview
           
-          # 打包完整版 tgz 与 zip（排除 src 开发源码及测试脚本）
+          # 修改 package.json 的版本号，添加 -full 后缀
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${RELEASE_VERSION}-full';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2), 'utf8');
+          "
+          
+          # 回到 nocobase-core 根目录执行完整构建
+          cd ../../../..
+          BUILD_FULL=true yarn build @nocobase/plugin-file-previewer-kkfileview
+          
+          # 进入插件子目录进行打包
+          cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
+          
+          # 打包完整版 tgz 与 zip（排除 src 源码，保留构建产物 dist 与 scripts）
           tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.tgz" \
             --exclude="node_modules" \
             --exclude=".git" \
@@ -74,14 +99,10 @@ jobs:
             --exclude="storage" \
             --exclude="docs" \
             --exclude="src" \
-            --exclude="scripts" \
             *
             
           zip -r "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.zip" * \
-            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "src/*" "scripts/*"
-
-          # 清理临时 public 静态资产目录
-          rm -rf public/file-viewer
+            -x "node_modules/*" ".git/*" ".github/*" "storage/*" "docs/*" "src/*"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
