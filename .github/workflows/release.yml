@@ -83,6 +83,17 @@ jobs:
           
           cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
           
+          # 打印调试信息并检测 dist 是否存在
+          echo "=== Light Build File List ==="
+          ls -la
+          if [ ! -d "dist" ]; then
+            echo "ERROR: dist directory not found in plugin workspace!"
+            exit 1
+          else
+            echo "dist directory found. Printing contents:"
+            ls -la dist
+          fi
+          
           # 清理本地可能存在的静态资产
           rm -rf public/file-viewer
           
@@ -117,6 +128,17 @@ jobs:
           
           # 进入插件子目录进行打包
           cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
+          
+          # 打印调试信息并检测 dist 是否存在
+          echo "=== Full Build File List ==="
+          ls -la
+          if [ ! -d "dist" ]; then
+            echo "ERROR: dist directory not found in plugin workspace!"
+            exit 1
+          else
+            echo "dist directory found. Printing contents:"
+            ls -la dist
+          fi
           
           # 打包完整版 tgz 与 zip（排除 src 源码，保留构建产物 dist 与 scripts）
           tar -czvf "/tmp/release-artifacts/plugin-file-previewer-kkfileview-v${RELEASE_VERSION}-full.tgz" \
