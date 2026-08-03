@@ -40,6 +40,11 @@ jobs:
           cd nocobase-core
           yarn install
 
+      - name: Build NocoBase Core
+        run: |
+          cd nocobase-core
+          yarn build
+
       - name: Get Plugin Version
         id: plugin_version
         run: |
