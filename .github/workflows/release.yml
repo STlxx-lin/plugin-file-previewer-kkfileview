@@ -56,6 +56,13 @@ jobs:
           }
           EOF
 
+      - name: Create Env Files
+        run: |
+          touch .env
+          touch .env.example
+          touch .env.e2e.example
+          touch .env.test.example
+
       - name: Install Dependencies
         run: yarn install
 
