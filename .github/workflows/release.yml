@@ -36,6 +36,9 @@ jobs:
               "packages/*/*",
               "packages/*/*/*"
             ],
+            "scripts": {
+              "nocobase": "nocobase-v1"
+            },
             "dependencies": {
               "@nocobase/app": "2.2.0-beta.15",
               "@nocobase/cli": "2.2.0-beta.15",
@@ -76,7 +79,7 @@ jobs:
 
       - name: Build & Package Light Version (轻量版 - 无内置静态资产)
         run: |
-          BUILD_FULL=false npx nocobase build @nocobase/plugin-file-previewer-kkfileview
+          BUILD_FULL=false yarn nocobase build @nocobase/plugin-file-previewer-kkfileview
           
           cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
           
@@ -110,7 +113,7 @@ jobs:
           
           # 回到工作区根目录执行完整构建
           cd ../../../..
-          BUILD_FULL=true npx nocobase build @nocobase/plugin-file-previewer-kkfileview
+          BUILD_FULL=true yarn nocobase build @nocobase/plugin-file-previewer-kkfileview
           
           # 进入插件子目录进行打包
           cd packages/plugins/@nocobase/plugin-file-previewer-kkfileview
