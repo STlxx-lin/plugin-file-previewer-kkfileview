@@ -28,7 +28,7 @@ jobs:
 
       - name: Clone NocoBase Core
         run: |
-          git clone --depth 1 https://github.com/nocobase/nocobase.git -b main nocobase-core
+          git clone --depth 1 https://github.com/nocobase/nocobase.git -b v2.2.0-beta.15 nocobase-core
 
       - name: Move Plugin to NocoBase Core
         run: |
