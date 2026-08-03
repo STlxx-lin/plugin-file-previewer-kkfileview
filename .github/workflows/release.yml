@@ -59,6 +59,66 @@ jobs:
           }
           EOF
 
+      - name: Generate Configuration Files
+        run: |
+          cat << 'EOF' > lerna.json
+          {
+            "version": "0.1.0",
+            "npmClient": "yarn",
+            "useWorkspaces": true
+          }
+          EOF
+          cat << 'EOF' > tsconfig.json
+          {
+            "extends": "./tsconfig.paths.json",
+            "compilerOptions": {
+              "esModuleInterop": true,
+              "moduleResolution": "node",
+              "jsx": "react",
+              "target": "esnext",
+              "module": "esnext",
+              "allowJs": true,
+              "noUnusedLocals": false,
+              "preserveConstEnums": true,
+              "skipLibCheck": true,
+              "sourceMap": true,
+              "inlineSources": true,
+              "resolveJsonModule": true,
+              "declaration": true,
+              "experimentalDecorators": true,
+              "downlevelIteration": true,
+              "baseUrl": "."
+            },
+            "exclude": [
+              "node_modules",
+              "**/dist",
+              "**/lib",
+              "**/*.js",
+              "**/*.d.ts"
+            ]
+          }
+          EOF
+          cat << 'EOF' > tsconfig.paths.json
+          {
+            "compilerOptions": {
+              "paths": {
+                "@nocobase/plugin-file-previewer-kkfileview/client": [
+                  "packages/plugins/@nocobase/plugin-file-previewer-kkfileview/src/client"
+                ],
+                "@nocobase/plugin-file-previewer-kkfileview/client-v2": [
+                  "packages/plugins/@nocobase/plugin-file-previewer-kkfileview/src/client-v2"
+                ],
+                "@nocobase/plugin-file-previewer-kkfileview/package.json": [
+                  "packages/plugins/@nocobase/plugin-file-previewer-kkfileview/package.json"
+                ],
+                "@nocobase/plugin-file-previewer-kkfileview": [
+                  "packages/plugins/@nocobase/plugin-file-previewer-kkfileview/src"
+                ]
+              }
+            }
+          }
+          EOF
+
       - name: Create Env Files
         run: |
           touch .env
