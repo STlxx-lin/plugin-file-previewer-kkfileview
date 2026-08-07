@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decidePreviewMode, getFileExt, normalizeExtensions, parseExtensions, parseExtensionsInput, unwrapDataArray } from '../previewUtils';
+import { decidePreviewMode, getFileExt, isNocoBaseForcedDownloadUrl, normalizeExtensions, parseExtensions, parseExtensionsInput, unwrapDataArray } from '../previewUtils';
 
 describe('previewUtils', () => {
   it('unwrapDataArray 应该正确解包数组、单对象与嵌套对象结构', () => {
@@ -81,5 +81,19 @@ describe('previewUtils', () => {
         enabledAndSupportedModes: ['microsoft'],
       })
     ).toBe('microsoft');
+  });
+
+  it('isNocoBaseForcedDownloadUrl 应该识别会被强制下载的 NocoBase 活动内容文件', () => {
+    expect(isNocoBaseForcedDownloadUrl('http://localhost:13000/files/main/main/attachments/13.pdf', 'pdf')).toBe(true);
+    expect(isNocoBaseForcedDownloadUrl('/files/main/main/attachments/13.pdf', 'pdf')).toBe(true);
+    expect(isNocoBaseForcedDownloadUrl('http://localhost:13000/storage/uploads/main/13.html', 'html')).toBe(true);
+    expect(isNocoBaseForcedDownloadUrl('http://localhost:13000/files/main/main/attachments/13.pdf?download=1', '')).toBe(true);
+  });
+
+  it('isNocoBaseForcedDownloadUrl 应该对普通文件与外部直链返回 false', () => {
+    expect(isNocoBaseForcedDownloadUrl('http://localhost:13000/files/main/main/attachments/13.jpg', 'jpg')).toBe(false);
+    expect(isNocoBaseForcedDownloadUrl('/storage/uploads/main/13.png', 'png')).toBe(false);
+    expect(isNocoBaseForcedDownloadUrl('https://obs.test.com/aifle/demo.pdf', 'pdf')).toBe(false);
+    expect(isNocoBaseForcedDownloadUrl('', 'pdf')).toBe(false);
   });
 });

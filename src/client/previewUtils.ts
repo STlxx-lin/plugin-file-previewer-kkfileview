@@ -104,6 +104,29 @@ export function getFileExt(url: string = '', extname: string = '') {
   return matched ? matched[1].toLowerCase() : '';
 }
 
+export const NOCOBASE_ACTIVE_CONTENT_EXTENSIONS = ['htm', 'html', 'pdf', 'svg', 'svgz', 'xhtml'];
+
+export function isNocoBaseManagedFileUrl(url: string = ''): boolean {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+  try {
+    const u = new URL(raw, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const path = u.pathname;
+    return path.includes('/storage/uploads/') || path.includes('/files/');
+  } catch {
+    return false;
+  }
+}
+
+export function isNocoBaseForcedDownloadUrl(url: string = '', extname: string = ''): boolean {
+  const raw = String(url || '').trim();
+  if (!raw || !isNocoBaseManagedFileUrl(raw)) return false;
+  const ext = getFileExt(raw, extname);
+  if (NOCOBASE_ACTIVE_CONTENT_EXTENSIONS.includes(ext)) return true;
+  const search = raw.split('?')[1]?.split('#')[0] || '';
+  return new URLSearchParams(search).get('download') === '1';
+}
+
 export function attachTokenToNocoFileUrl(url: string = '', token?: string | null): string {
   const rawUrl = String(url || '').trim();
   if (!rawUrl || !token) return rawUrl;

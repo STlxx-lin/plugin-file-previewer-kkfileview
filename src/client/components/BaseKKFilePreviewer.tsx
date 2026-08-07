@@ -6,7 +6,7 @@ import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
 import { FileViewerRenderer, FileViewerFetchFileFn } from '../FileViewerRenderer';
 import { resolveFileViewerAssetBase } from '../fileViewerRuntime';
-import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, parseExtensions } from '../previewUtils';
+import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, isNocoBaseForcedDownloadUrl, parseExtensions } from '../previewUtils';
 import {
   EmbedCodePermission,
   PREVIEW_SERVICE_REGISTRY,
@@ -551,6 +551,12 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     return fileMeta.isPdf ? fileMeta.fullUrl : '';
   }, [fileMeta, previewMode, previewUrlMap]);
 
+  const needsInlineBlobFetch = useMemo(() => {
+    if (!resolvedPreviewUrl) return false;
+    if (previewMode === 'fileViewer') return false;
+    return isNocoBaseForcedDownloadUrl(resolvedPreviewUrl, fileMeta.ext);
+  }, [resolvedPreviewUrl, fileMeta.ext, previewMode]);
+
   const servicePreviewDisabled = preferredPreview === 'none' || enabledModes.length === 0;
   const unsupportedByAllOff = servicePreviewDisabled && !fileMeta.isImg && !fileMeta.isPdf;
   const unsupportedByFormats = !servicePreviewDisabled && !fileMeta.isImg && !fileMeta.isPdf && enabledAndSupportedModes.length === 0;
@@ -561,6 +567,58 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const [iframeLoadFailed, setIframeLoadFailed] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
   const [iframeRetrySeed, setIframeRetrySeed] = useState(0);
+  const [inlinePreviewBlobUrl, setInlinePreviewBlobUrl] = useState('');
+  const inlinePreviewRevokeRef = useRef<() => void>();
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = '';
+    inlinePreviewRevokeRef.current?.();
+    inlinePreviewRevokeRef.current = undefined;
+    setInlinePreviewBlobUrl('');
+    if (!needsInlineBlobFetch || !resolvedPreviewUrl) {
+      return;
+    }
+    const load = async () => {
+      try {
+        const headers: HeadersInit = {};
+        let targetUrl = resolvedPreviewUrl;
+        const token = api.auth.token;
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          if (!targetUrl.includes('token=')) {
+            const separator = targetUrl.includes('?') ? '&' : '?';
+            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
+          }
+        }
+        const resp = await fetch(targetUrl, { headers });
+        if (!resp.ok) {
+          throw new Error(`Fetch preview file failed with status ${resp.status}`);
+        }
+        const blob = await resp.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        const revoke = () => {
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+        inlinePreviewRevokeRef.current = revoke;
+        setInlinePreviewBlobUrl(objectUrl);
+      } catch (error) {
+        if (cancelled) return;
+        console.error('[kkfileview] inline preview fetch error:', error);
+        iframeLoadedRef.current = false;
+        setIframeLoadFailed(true);
+        setIframeLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [needsInlineBlobFetch, resolvedPreviewUrl, api.auth.token, iframeRetrySeed]);
+
+  const effectivePreviewUrl = needsInlineBlobFetch ? inlinePreviewBlobUrl : resolvedPreviewUrl;
   const [fileViewerProgress, setFileViewerProgress] = useState<number>(0);
   const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iframeLoadedRef = useRef(false);
@@ -838,11 +896,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     }
 
     if (!resolvedPreviewUrl) return;
-    const popup = window.open(resolvedPreviewUrl, '_blank', 'noopener,noreferrer');
+    const popup = window.open(effectivePreviewUrl, '_blank', 'noopener,noreferrer');
     if (popup) {
       try { popup.opener = null; } catch { }
     }
-  }, [unsupportedFile, previewMode, serviceConfigMap.fileViewer.host, kkfileviewConfig.fileViewerDownloaded, viewerFileName, fileMeta.fullUrl, watermarkText, resolvedPreviewUrl]);
+  }, [unsupportedFile, previewMode, serviceConfigMap.fileViewer.host, kkfileviewConfig.fileViewerDownloaded, viewerFileName, fileMeta.fullUrl, watermarkText, resolvedPreviewUrl, effectivePreviewUrl]);
 
   const openEmbedConfigModal = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1039,7 +1097,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             </div>
           ) : fileMeta.isImg ? (
             <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-              <img src={fileMeta.fullUrl} alt={fileDisplayTitle} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              <img src={effectivePreviewUrl || fileMeta.fullUrl} alt={fileDisplayTitle} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
             </div>
           ) : (previewMode as string) === 'fileViewer' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -1096,10 +1154,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             </div>
           ) : (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              {resolvedPreviewUrl ? (
+              {effectivePreviewUrl ? (
                 <iframe
-                  key={`${resolvedPreviewUrl}-${iframeRetrySeed}`}
-                  src={resolvedPreviewUrl}
+                  key={`${effectivePreviewUrl}-${iframeRetrySeed}`}
+                  src={effectivePreviewUrl}
                   style={{ width: '100%', height: '100%', border: 'none', display: 'block', backgroundColor: '#fff' }}
                   onLoad={() => {
                     iframeLoadedRef.current = true;
@@ -1225,11 +1283,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
                     size="small"
                     icon={<ExportOutlined />}
                     onClick={handleOpenNewWindow}
-                    disabled={unsupportedFile || !resolvedPreviewUrl}
+                    disabled={unsupportedFile || !effectivePreviewUrl}
                   />
                 </Tooltip>
               ) : (
-                <Button icon={<ExportOutlined />} onClick={handleOpenNewWindow} disabled={unsupportedFile || !resolvedPreviewUrl}>
+                <Button icon={<ExportOutlined />} onClick={handleOpenNewWindow} disabled={unsupportedFile || !effectivePreviewUrl}>
                   {t('Open in new window')}
                 </Button>
               )
