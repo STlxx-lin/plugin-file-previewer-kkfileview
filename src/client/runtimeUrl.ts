@@ -1,3 +1,5 @@
+import { FILE_VIEWER_PROXY_PATH_KEYWORD } from '../shared/constants';
+
 type RuntimeWindow = Window & {
   __nocobase_public_path__?: string;
 };
@@ -66,4 +68,48 @@ export function resolveFileUrl(rawUrl: string = '', fallbackHost: string = '') {
   }
   if (!resolvedBase) return normalizedUrl;
   return new URL(normalizedUrl.replace(/^\/+/, ''), resolvedBase).toString();
+}
+
+export function getApiBaseUrl(): string {
+  if (typeof window === 'undefined') return '/api/';
+  const runtimeWindow = window as RuntimeWindow & {
+    __nocobase_api_base_url__?: string;
+  };
+  const runtimeApiBase = runtimeWindow.__nocobase_api_base_url__;
+  if (typeof runtimeApiBase === 'string' && runtimeApiBase.trim()) {
+    return runtimeApiBase.trim().replace(/\/+$/, '');
+  }
+  return '/api';
+}
+
+/**
+ * 判断给定地址是否为 File Viewer 代理接口地址。
+ * 代理接口通过独立的短期预览令牌鉴权，客户端应避免在此类地址上附加用户会话令牌。
+ */
+export function isFileViewerProxyUrl(url: unknown): boolean {
+  return String(url || '').includes(FILE_VIEWER_PROXY_PATH_KEYWORD);
+}
+
+/**
+ * 构建 File Viewer 代理地址。
+ * 前端只请求该安全代理路径，由服务端代为拉取源文件，避免直接暴露源文件地址。
+ */
+export function buildFileViewerProxyUrl(fileUrl: string, token?: string | null): string {
+  const rawUrl = String(fileUrl || '').trim();
+  if (!rawUrl) return '';
+  const apiBase = getApiBaseUrl();
+  const params = new URLSearchParams();
+  params.set('url', rawUrl);
+  if (token) {
+    params.set('token', token);
+  }
+  const relativeUrl = `${apiBase}/${FILE_VIEWER_PROXY_PATH_KEYWORD}:get?${params.toString()}`;
+  if (typeof window === 'undefined' || !window.location) {
+    return relativeUrl;
+  }
+  try {
+    return new URL(relativeUrl, window.location.origin).toString();
+  } catch {
+    return relativeUrl;
+  }
 }

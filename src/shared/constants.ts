@@ -38,3 +38,6 @@ export const DEFAULT_FILE_VIEWER_EXTENSIONS = [
 
 /** 默认优先的预览引擎 */
 export const DEFAULT_PREFERRED_PREVIEW = 'microsoft';
+
+/** File Viewer 代理接口路径关键字，client 与 server 统一用于识别代理地址 */
+export const FILE_VIEWER_PROXY_PATH_KEYWORD = 'kkfileviewFileViewerProxy';

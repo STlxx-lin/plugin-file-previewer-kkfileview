@@ -2,6 +2,7 @@ import { buildStorageBaseUrl } from '../client/previewUtils';
 import { Plugin } from '@nocobase/server';
 import path from 'path';
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 import os from 'os';
 import net from 'net';
 import {
@@ -15,6 +16,11 @@ import {
   DEFAULT_PREFERRED_PREVIEW,
 } from '../shared/constants';
 import { resolveWatermarkTemplate } from '../shared/watermarkTemplate';
+import {
+  buildFileViewerPreviewTokenPayload,
+  getPreviewTokenExpiresIn,
+  isFileViewerPreviewTokenPayload,
+} from './previewToken';
 
 type RoleLike = string | {
   name?: string;
@@ -354,6 +360,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.registerPreviewRecordsResource();
     this.registerFieldCleanupResource();
     this.registerFileViewerDownloadResource();
+    this.registerFileViewerProxyResource();
     this.registerSettingsListResource();
     this.registerPublicAssetsResource();
     this.app.acl.allow('kkfileviewPublicAssets', 'get', 'public');
@@ -361,6 +368,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.app.acl.allow('kkfileviewSettingsSave', 'save', 'loggedIn');
     this.app.acl.allow('kkfileviewHealthCheck', 'check', 'loggedIn');
     this.app.acl.allow('kkfileviewPreview', 'generate', 'loggedIn'); // 允许已登录用户访问预览接口
+    this.app.acl.allow('kkfileviewPreview', 'resolveDirectUrl', 'loggedIn');
+    this.app.acl.allow('kkfileviewPreview', 'createFileViewerToken', 'loggedIn');
     this.app.acl.allow('kkfileviewModificationRecords', 'list', 'loggedIn');
     this.app.acl.allow('kkfileviewModificationRecords', 'append', 'loggedIn');
     this.app.acl.allow('kkfileviewModificationRecords', 'remove', 'loggedIn');
@@ -371,6 +380,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.app.acl.allow('kkfileviewPreviewRecords', 'clear', 'loggedIn');
     this.app.acl.allow('kkfileviewFieldCleanup', 'run', 'loggedIn');
     this.app.acl.allow('kkfileviewFileViewerDownload', ['download', 'progress'], 'loggedIn');
+    this.app.acl.allow('kkfileviewFileViewerProxy', 'get', 'loggedIn');
 
     await this.db.sync({ force: false, alter: { drop: false } });
     await this.ensureDefaultRecord();
@@ -846,6 +856,50 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     await this.ensureDefaultRecord();
   }
 
+  /**
+   * 签发 File Viewer 预览用的短期令牌。
+   * 令牌使用与 NocoBase 会话一致的签名密钥，但带独立 audience/scope，
+   * 有效期默认 10 分钟（可被环境变量调整），并且绑定到具体的文件地址，
+   * 确保预览地址中的令牌只能临时使用，且每次预览都会签发全新的令牌。
+   */
+  private async issueFileViewerPreviewToken(ctx: ActionContext): Promise<{ token: string; expiresAt: number; expiresIn: string } | null> {
+    const values = getActionValues(ctx);
+    const fileUrl = String(values.url || '').trim();
+    if (!fileUrl) {
+      ctx.status = 400;
+      ctx.body = { data: { message: 'url-required' } };
+      return null;
+    }
+    const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+    const userId = (currentUser as any)?.id;
+    if (!userId) {
+      ctx.status = 401;
+      ctx.body = { data: { message: 'unauthenticated' } };
+      return null;
+    }
+    const resolvedTargetUrl = await this.resolveNocoBasePermanentFileUrl(ctx, fileUrl);
+    const roleName = typeof (ctx as any)?.state?.currentRole === 'string' ? (ctx as any).state.currentRole : undefined;
+    const expiresIn = getPreviewTokenExpiresIn();
+    const payload = buildFileViewerPreviewTokenPayload(userId, {
+      roleName,
+      targetUrl: resolvedTargetUrl || fileUrl,
+    });
+    const token = (this.app as any).authManager.jwt.sign(payload, {
+      expiresIn,
+      jwtid: crypto.randomUUID(),
+    });
+    let expiresAt = Date.now() + 10 * 60 * 1000;
+    try {
+      const decoded = await (this.app as any).authManager.jwt.decode(token);
+      if (decoded && typeof decoded === 'object' && typeof (decoded as any).exp === 'number') {
+        expiresAt = (decoded as any).exp * 1000;
+      }
+    } catch {
+      // 忽略解码失败，回退到估算过期时间。
+    }
+    return { token, expiresAt, expiresIn };
+  }
+
   private async resolveNocoBasePermanentFileUrl(ctx: any, fileUrl: string): Promise<string> {
     const urlString = String(fileUrl || '').trim();
     if (!urlString) return urlString;
@@ -960,6 +1014,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       return;
     }
     const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
+    const issuePreviewToken = this.issueFileViewerPreviewToken.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -1047,6 +1102,13 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
               directUrl,
               originalUrl: fileUrl,
             },
+          };
+        },
+        async createFileViewerToken(ctx: ActionContext) {
+          const result = await issuePreviewToken(ctx);
+          if (!result) return;
+          ctx.body = {
+            data: result,
           };
         },
       },
@@ -1738,6 +1800,91 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           }
         },
       }
+    });
+  }
+
+  private registerFileViewerProxyResource() {
+    if (this.app.resourceManager.isDefined('kkfileviewFileViewerProxy')) {
+      return;
+    }
+    const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
+    const decodeToken = (this.app as any).authManager.jwt.decode.bind((this.app as any).authManager.jwt);
+    this.app.resourceManager.define({
+      name: 'kkfileviewFileViewerProxy',
+      actions: {
+        async get(ctx: ActionContext) {
+          const values = getActionValues(ctx);
+          const fileUrl = String(values.url || '').trim();
+          if (!fileUrl) {
+            ctx.status = 400;
+            ctx.body = { data: { message: 'url-required' } };
+            return;
+          }
+          try {
+            let targetUrl = await resolvePermanentUrl(ctx, fileUrl);
+            // 仅接受短期预览令牌访问，避免在预览地址中长期暴露用户会话令牌。
+            const rawToken = String(values.token || '').trim();
+            let previewPayload: Record<string, unknown> | null = null;
+            if (rawToken) {
+              try {
+                const decoded = await decodeToken(rawToken);
+                if (isFileViewerPreviewTokenPayload(decoded)) {
+                  previewPayload = (decoded as Record<string, unknown>) || null;
+                }
+              } catch {
+                previewPayload = null;
+              }
+            }
+            if (!previewPayload) {
+              ctx.status = 403;
+              ctx.body = { data: { message: 'file-viewer-preview-token-required' } };
+              return;
+            }
+            const boundTargetUrl = String(previewPayload.targetUrl || '').trim();
+            if (boundTargetUrl && boundTargetUrl !== targetUrl) {
+              ctx.status = 403;
+              ctx.body = { data: { message: 'file-viewer-preview-token-mismatch' } };
+              return;
+            }
+            const token = rawToken;
+            if (token && (targetUrl.includes('/files/') || targetUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(targetUrl)) && !targetUrl.includes('token=')) {
+              const separator = targetUrl.includes('?') ? '&' : '?';
+              targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
+            }
+            if (!/^https?:\/\//i.test(targetUrl)) {
+              const request = (ctx as any)?.request || {};
+              const host = request.header?.host || request.host || '';
+              const protocol = request.protocol || 'http';
+              const publicPath = (ctx as any)?.app?.getAppPublicPath?.() || process.env.APP_PUBLIC_PATH || '/';
+              const base = `${protocol}://${host}${publicPath.replace(/\/+$/, '')}`;
+              targetUrl = `${base}${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+            }
+            const axios = require('axios');
+            const response = await axios({
+              method: 'get',
+              url: targetUrl,
+              responseType: 'stream',
+              timeout: 60000,
+              maxRedirects: 5,
+              headers: {
+                'Accept': '*/*',
+              },
+            });
+            const contentType = response.headers['content-type'] || 'application/octet-stream';
+            ctx.status = 200;
+            ctx.set('Content-Type', contentType);
+            ctx.set('Content-Disposition', 'inline');
+            ctx.body = response.data;
+          } catch (error) {
+            ctx.status = 502;
+            ctx.body = {
+              data: {
+                message: getErrorMessage(error, 'file-viewer-proxy-failed'),
+              },
+            };
+          }
+        },
+      },
     });
   }
 

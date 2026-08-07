@@ -15,7 +15,8 @@ import {
 } from '../configCache';
 import { useKkfileviewConfig } from '../useKkfileviewConfig';
 import { resolveWatermarkTemplate } from '../watermarkTemplate';
-import { resolveFileUrl } from '../runtimeUrl';
+import { resolveFileUrl, isFileViewerProxyUrl } from '../runtimeUrl';
+import { buildFileViewerProxyUrl } from '../runtimeUrl';
 import { DEFAULT_EXTENSIONS, DEFAULT_FILE_VIEWER_EXTENSIONS, DEFAULT_MICROSOFT_EXTENSIONS } from '../../shared/constants';
 
 function escapeHtml(str: string): string {
@@ -238,9 +239,12 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const fetchFileWithAuth = useCallback<FileViewerFetchFileFn>(async ({ url, signal }) => {
     try {
       const isExternalCdn = /^https?:\/\//i.test(url) && (typeof window !== 'undefined' && window.location ? !url.startsWith(window.location.origin) : true);
+      const isProxyTarget = isFileViewerProxyUrl(url);
       let targetUrl = url;
       const headers: HeadersInit = {};
-      if (!isExternalCdn) {
+      // 代理地址已携带短期预览令牌，直接由查询参数鉴权，
+      // 避免再把用户会话令牌写入请求头覆盖短期令牌。
+      if (!isExternalCdn && !isProxyTarget) {
         if (api.auth.token) {
           headers['Authorization'] = `Bearer ${api.auth.token}`;
           if (!targetUrl.includes('token=')) {
@@ -619,6 +623,57 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   }, [needsInlineBlobFetch, resolvedPreviewUrl, api.auth.token, iframeRetrySeed]);
 
   const effectivePreviewUrl = needsInlineBlobFetch ? inlinePreviewBlobUrl : resolvedPreviewUrl;
+  const [fileViewerPreviewToken, setFileViewerPreviewToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFileViewerPreviewToken(null);
+    if (!isOpen || (previewMode as string) !== 'fileViewer' || !fileMeta.fullUrl) {
+      return undefined;
+    }
+    api.request({
+      url: 'kkfileviewPreview:createFileViewerToken',
+      method: 'get',
+      params: { url: fileMeta.fullUrl },
+      skipNotify: true,
+    })
+      .then((res: any) => {
+        if (cancelled) return;
+        const findToken = (obj: any): string => {
+          if (!obj || typeof obj !== 'object') return '';
+          if (typeof obj.token === 'string' && obj.token.trim()) return obj.token;
+          for (const key of Object.keys(obj)) {
+            if (obj[key] && typeof obj[key] === 'object') {
+              const found = findToken(obj[key]);
+              if (found) return found;
+            }
+          }
+          return '';
+        };
+        const token = findToken(res);
+        if (token) {
+          setFileViewerPreviewToken(token);
+        } else {
+          iframeLoadedRef.current = false;
+          setIframeLoadFailed(true);
+          setIframeLoading(false);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        iframeLoadedRef.current = false;
+        setIframeLoadFailed(true);
+        setIframeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, previewMode, fileMeta.fullUrl, api]);
+
+  const fileViewerProxyUrl = useMemo(
+    () => buildFileViewerProxyUrl(fileMeta.fullUrl, fileViewerPreviewToken),
+    [fileMeta.fullUrl, fileViewerPreviewToken]
+  );
   const [fileViewerProgress, setFileViewerProgress] = useState<number>(0);
   const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const iframeLoadedRef = useRef(false);
@@ -740,10 +795,17 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         );
         const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
         const safeTitle = escapeHtml(viewerFileName);
-        const safeFileUrl = JSON.stringify(fileMeta.fullUrl);
+        const safeFileUrl = JSON.stringify(fileViewerProxyUrl || fileMeta.fullUrl);
         const safeFileName = JSON.stringify(viewerFileName);
         const safeAssetBase = JSON.stringify(resolvedAssetBase);
-        const safeWatermark = watermarkText ? JSON.stringify(watermarkText) : 'null';
+        const safeWatermarkConfig = watermarkText
+          ? JSON.stringify({
+              text: watermarkText,
+              opacity: typeof kkfileviewConfig.watermarkOpacity === 'number' ? kkfileviewConfig.watermarkOpacity : 0.18,
+              color: kkfileviewConfig.watermarkColor || 'rgba(0, 0, 0, 0.18)',
+              rotate: typeof kkfileviewConfig.watermarkRotate === 'number' ? kkfileviewConfig.watermarkRotate : -24,
+            })
+          : 'null';
 
         const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -852,16 +914,17 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         if (globalLib.setDefaultFullAssetBaseUrl) {
           globalLib.setDefaultFullAssetBaseUrl(${safeAssetBase});
         }
-        var wm = ${safeWatermark};
+        var watermarkConfig = ${safeWatermarkConfig};
         var options = { styleIsolation: 'shadow', toolbar: true };
-        if (wm) {
-          options.watermark = wm;
+        if (watermarkConfig) {
+          options.watermark = watermarkConfig;
         }
         try {
           globalLib.mountViewer(host, {
             url: ${safeFileUrl},
             name: ${safeFileName},
             filename: ${safeFileName},
+            watermark: watermarkConfig ? watermarkConfig.text : undefined,
             options: options
           });
           // 掩膜打印 CSS 补注入，确保 Shadow DOM 内掩膜工具栏样式正常
@@ -900,7 +963,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     if (popup) {
       try { popup.opener = null; } catch { }
     }
-  }, [unsupportedFile, previewMode, serviceConfigMap.fileViewer.host, kkfileviewConfig.fileViewerDownloaded, viewerFileName, fileMeta.fullUrl, watermarkText, resolvedPreviewUrl, effectivePreviewUrl]);
+  }, [unsupportedFile, previewMode, serviceConfigMap.fileViewer.host, kkfileviewConfig.fileViewerDownloaded, kkfileviewConfig.watermarkOpacity, kkfileviewConfig.watermarkRotate, kkfileviewConfig.watermarkColor, viewerFileName, fileMeta.fullUrl, watermarkText, resolvedPreviewUrl, effectivePreviewUrl, fileViewerProxyUrl]);
 
   const openEmbedConfigModal = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1101,10 +1164,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             </div>
           ) : (previewMode as string) === 'fileViewer' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              {resolvedPreviewUrl ? (
+              {resolvedPreviewUrl && fileViewerPreviewToken ? (
                 <FileViewerRenderer
                   key={`fv-${iframeRetrySeed}`}
-                  fileUrl={resolvedPreviewUrl}
+                  fileUrl={fileViewerProxyUrl}
                   fileName={viewerFileName}
                   watermark={watermarkText}
                   watermarkOpacity={kkfileviewConfig.watermarkOpacity}
