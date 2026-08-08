@@ -42,6 +42,30 @@ function isPdfFile(url: string = '', extname: string = '') {
   return /\.pdf$/i.test(url);
 }
 
+/**
+ * File Viewer 渲染错误边界。
+ * File Viewer 库在挂载、渲染或卸载（controller.destroy）过程中可能抛出异常，
+ * 若不拦截会击穿 React 组件树，导致整个预览弹窗失去响应（点关闭无效）。
+ * 这里把异常限制在边界内，保证弹窗始终可以关闭。
+ */
+class ViewerErrorBoundary extends React.Component<{ children: React.ReactNode; onError?: () => void }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('[fileViewer] viewer error boundary caught:', error);
+    this.props.onError?.();
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
 function getServiceHostFallback(
   service: typeof PREVIEW_SERVICE_REGISTRY[number],
   kkfileviewConfig: ReturnType<typeof useKkfileviewConfig>['config']
@@ -1090,6 +1114,19 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     if (onOpenChange) onOpenChange(false);
   }, [onClose, onOpenChange]);
 
+  // 使用捕获阶段监听 Esc：File Viewer 的阴影 DOM 可能吞掉按键事件导致
+  // antd Modal 自带的 Esc 关闭失效，捕获阶段监听可以保证始终能关闭预览弹窗。
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !embedConfigVisible) {
+        handleClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, embedConfigVisible, handleClose]);
+
   const handleDownload = useCallback(() => {
     if (kkfileviewConfig.enableDownload === false) {
       message.warning(t('Download functionality is disabled'));
@@ -1165,35 +1202,44 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           ) : (previewMode as string) === 'fileViewer' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {resolvedPreviewUrl && fileViewerPreviewToken ? (
-                <FileViewerRenderer
+                <ViewerErrorBoundary
                   key={`fv-${iframeRetrySeed}`}
-                  fileUrl={fileViewerProxyUrl}
-                  fileName={viewerFileName}
-                  watermark={watermarkText}
-                  watermarkOpacity={kkfileviewConfig.watermarkOpacity}
-                  watermarkRotate={kkfileviewConfig.watermarkRotate}
-                  watermarkColor={kkfileviewConfig.watermarkColor}
-                  enableDownload={kkfileviewConfig.enableDownload !== false}
-                  assetBase={serviceConfigMap.fileViewer.host}
-                  fileViewerDownloaded={Boolean(kkfileviewConfig.fileViewerDownloaded)}
-                  fetchFile={kkfileviewConfig.fileViewerLoadMode === 'cdn' ? undefined : fetchFileWithAuth}
-                  onReady={() => {
-                    iframeLoadedRef.current = true;
-                    setIframeLoadFailed(false);
-                    setIframeLoading(false);
-                    setFileViewerProgress(100);
-                  }}
-                  onError={(err) => {
-                    console.error('[fileViewer] render error:', err);
+                  onError={() => {
                     iframeLoadedRef.current = false;
                     setIframeLoadFailed(true);
                     setIframeLoading(false);
                     setFileViewerProgress(0);
                   }}
-                  onProgress={(percent) => {
-                    setFileViewerProgress(percent);
-                  }}
-                />
+                >
+                  <FileViewerRenderer
+                    fileUrl={fileViewerProxyUrl}
+                    fileName={viewerFileName}
+                    watermark={watermarkText}
+                    watermarkOpacity={kkfileviewConfig.watermarkOpacity}
+                    watermarkRotate={kkfileviewConfig.watermarkRotate}
+                    watermarkColor={kkfileviewConfig.watermarkColor}
+                    enableDownload={kkfileviewConfig.enableDownload !== false}
+                    assetBase={serviceConfigMap.fileViewer.host}
+                    fileViewerDownloaded={Boolean(kkfileviewConfig.fileViewerDownloaded)}
+                    fetchFile={kkfileviewConfig.fileViewerLoadMode === 'cdn' ? undefined : fetchFileWithAuth}
+                    onReady={() => {
+                      iframeLoadedRef.current = true;
+                      setIframeLoadFailed(false);
+                      setIframeLoading(false);
+                      setFileViewerProgress(100);
+                    }}
+                    onError={(err) => {
+                      console.error('[fileViewer] render error:', err);
+                      iframeLoadedRef.current = false;
+                      setIframeLoadFailed(true);
+                      setIframeLoading(false);
+                      setFileViewerProgress(0);
+                    }}
+                    onProgress={(percent) => {
+                      setFileViewerProgress(percent);
+                    }}
+                  />
+                </ViewerErrorBoundary>
               ) : null}
 
               {showFileViewerLoading ? (
