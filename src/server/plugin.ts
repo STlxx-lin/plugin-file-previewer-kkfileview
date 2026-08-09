@@ -289,6 +289,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   /** 令牌签发请求限流记录：userId -> 时间戳列表（滑动窗口）。 */
   private previewTokenRequestLog = new Map<number | string, number[]>();
 
+  /** 预览记录写入限流记录：userId -> 时间戳列表（滑动窗口）。 */
+  private previewRecordAppendLog = new Map<number | string, number[]>();
+
   /** 令牌签发限流：每个用户每分钟最多签发次数。 */
   private static readonly PREVIEW_TOKEN_RATE_LIMIT_MAX = 30;
 
@@ -667,12 +670,22 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     if (this.app.resourceManager.isDefined('kkfileviewPreviewRecords')) {
       return;
     }
+    // 资源动作由 koa-compose 调用，不绑定 this，需用闭包显式绑定。
+    const isActionRateLimited = this.isActionRateLimited.bind(this);
+    const previewRecordAppendLog = this.previewRecordAppendLog;
     this.app.resourceManager.define({
       name: 'kkfileviewPreviewRecords',
       actions: {
         async append(ctx: ActionContext) {
           const values = getActionValues(ctx);
           const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+          // 防止恶意刷写预览记录表：每用户每分钟最多写入 30 条。
+          const userId = (currentUser as any)?.id;
+          if (userId != null && isActionRateLimited(previewRecordAppendLog, userId, 30, 60 * 1000)) {
+            ctx.status = 429;
+            ctx.body = { data: { success: false, message: 'preview-record-rate-limited' } };
+            return;
+          }
           const operator = String(
             currentUser?.nickname || currentUser?.username || values.operator || '-'
           ).trim() || '-';
@@ -926,6 +939,28 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   /**
+   * 将 NocoBase 托管路径（相对或绝对）归一化为与当前请求同源的绝对地址。
+   * 外部存储直链一律不返回，统一经 NocoBase 自身路径访问以应用 ACL 校验。
+   */
+  private buildSameOriginAbsoluteUrl(ctx: ActionContext, url: string): string {
+    if (!url) return url;
+    let pathAndQuery = url;
+    try {
+      const parsed = new URL(pathAndQuery, 'http://localhost');
+      pathAndQuery = parsed.pathname + parsed.search;
+    } catch {
+      // 保持原样。
+    }
+    if (/^https?:\/\//i.test(pathAndQuery)) return pathAndQuery;
+    const request = (ctx as any)?.request || {};
+    const host = request.header?.host || request.host || '';
+    const protocol = request.protocol || 'http';
+    const publicPath = (ctx as any)?.app?.getAppPublicPath?.() || process.env.APP_PUBLIC_PATH || '/';
+    const base = `${protocol}://${host}${publicPath.replace(/\/+$/, '')}`;
+    return `${base}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+  }
+
+  /**
    * 为指定文件地址签发短期预览令牌（不写 ctx）。
    * 令牌绑定的是源文件地址（NocoBase 托管路径），代理侧据此校验一致性。
    * 非 NocoBase 托管地址或未登录时返回 null。
@@ -1006,137 +1041,34 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
 
   /** 令牌签发限流：每个用户每分钟最多签发 PREVIEW_TOKEN_RATE_LIMIT_MAX 次。 */
   private isPreviewTokenRateLimited(userId: number | string): boolean {
+    return this.isActionRateLimited(
+      this.previewTokenRequestLog,
+      userId,
+      PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_MAX,
+      PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_WINDOW,
+    );
+  }
+
+  /** 通用滑动窗口限流：记录命中窗口内超过 max 次则拒绝。 */
+  private isActionRateLimited(log: Map<number | string, number[]>, userId: number | string, max: number, windowMs: number): boolean {
     const now = Date.now();
-    const window = PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_WINDOW;
-    const max = PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_MAX;
-    const recent = (this.previewTokenRequestLog.get(userId) || []).filter((t) => now - t < window);
+    const recent = (log.get(userId) || []).filter((t) => now - t < windowMs);
     if (recent.length >= max) {
-      this.previewTokenRequestLog.set(userId, recent);
+      log.set(userId, recent);
       return true;
     }
     recent.push(now);
-    this.previewTokenRequestLog.set(userId, recent);
+    log.set(userId, recent);
     return false;
-  }
-
-  private async resolveNocoBasePermanentFileUrl(ctx: any, fileUrl: string): Promise<string> {
-    const urlString = String(fileUrl || '').trim();
-    if (!urlString) return urlString;
-    
-    // 1. 匹配 NocoBase 永久地址格式: /files/{app}/{dataSource}/{table}/{id}.{ext}
-    const match = urlString.match(/\/files\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(\d+)(?:\.([a-z0-9]+))?/i);
-    if (match && ctx?.db) {
-      const [, appName, dataSourceKey, tableName, fileId] = match;
-      // 表名必须为合法标识符，防止拼接进原生 SQL 造成注入。
-      const isValidTableName = /^[A-Za-z0-9_]+$/.test(tableName || '');
-
-      // 方案 A: 使用 Sequelize 原生 SQL 联查（100% 准确提取数据库中存好的 baseUrl 与 filename）
-      try {
-        if (isValidTableName && ctx.db.sequelize && typeof ctx.db.sequelize.query === 'function') {
-          const sql = `SELECT a.filename, a.name, a.path, a.url, s.baseUrl, s.baseurl, s.options
-                       FROM ${tableName} a 
-                       LEFT JOIN storages s ON (a.storageId = s.id OR a.storage_id = s.id)
-                       WHERE a.id = :id LIMIT 1`;
-          const [results] = await ctx.db.sequelize.query(sql, {
-            replacements: { id: fileId },
-            type: ctx.db.sequelize.QueryTypes?.SELECT || 'SELECT',
-          });
-          const row = Array.isArray(results) ? results[0] : results;
-          if (row) {
-            const filename = row.filename || row.name || row.path || row.url;
-            let baseUrl = row.baseUrl || row.baseurl;
-            if (!baseUrl && row.options) {
-              try {
-                const opts = typeof row.options === 'string' ? JSON.parse(row.options) : row.options;
-                baseUrl = opts?.baseUrl || opts?.baseurl || opts?.endpoint;
-              } catch {
-                // ignore
-              }
-            }
-            if (baseUrl && /^https?:\/\//i.test(baseUrl) && filename) {
-              const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-              const cleanFilename = String(filename).replace(/^\/+/, '');
-              let encodedName = cleanFilename;
-              try {
-                if (decodeURIComponent(cleanFilename) === cleanFilename) {
-                  encodedName = encodeURIComponent(cleanFilename);
-                }
-              } catch {
-                encodedName = encodeURIComponent(cleanFilename);
-              }
-              return `${cleanBase}${encodedName}`;
-            }
-          }
-        }
-      } catch {
-        // fallback to repository query
-      }
-
-      // 方案 B: 使用 NocoBase Repository 联查
-      try {
-        if (typeof ctx.db.getRepository === 'function') {
-          const repo = ctx.db.getRepository(tableName);
-          if (repo) {
-            const fileRecord = await repo.findOne({
-              filter: { id: fileId },
-              appends: ['storage', 'fileStorage', 'storages'],
-            });
-            if (fileRecord) {
-              const rawFile = typeof fileRecord.toJSON === 'function' ? fileRecord.toJSON() : fileRecord;
-              const filename = rawFile.filename || rawFile.name || rawFile.path || rawFile.url;
-              const storage = rawFile.storage || rawFile.fileStorage || rawFile.storages;
-              const storageId = rawFile.storageId || rawFile.storage_id;
-
-              let baseUrl = storage?.baseUrl || storage?.baseurl || storage?.options?.baseUrl;
-
-              if (!baseUrl && storageId) {
-                for (const tableCandidate of ['storages', 'file_storages', 'fileStorages', 'attachments_storages']) {
-                  try {
-                    const storageRepo = ctx.db.getRepository(tableCandidate);
-                    if (storageRepo) {
-                      const storageRecord = await storageRepo.findOne({ filter: { id: storageId } });
-                      if (storageRecord) {
-                        const rawStorage = typeof storageRecord.toJSON === 'function' ? storageRecord.toJSON() : storageRecord;
-                        baseUrl = rawStorage.baseUrl || rawStorage.baseurl || rawStorage.options?.baseUrl || rawStorage.options?.host;
-                        if (baseUrl) break;
-                      }
-                    }
-                  } catch {
-                    // ignore
-                  }
-                }
-              }
-
-              if (baseUrl && /^https?:\/\//i.test(baseUrl) && filename) {
-                const cleanBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
-                const cleanFilename = String(filename).replace(/^\/+/, '');
-                let encodedName = cleanFilename;
-                try {
-                  if (decodeURIComponent(cleanFilename) === cleanFilename) {
-                    encodedName = encodeURIComponent(cleanFilename);
-                  }
-                } catch {
-                  encodedName = encodeURIComponent(cleanFilename);
-                }
-                return `${cleanBase}${encodedName}`;
-              }
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return urlString;
   }
 
   private registerPreviewResource() {
     if (this.app.resourceManager.isDefined('kkfileviewPreview')) {
       return;
     }
-    const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
     const issuePreviewToken = this.issueFileViewerPreviewToken.bind(this);
     const issuePreviewTokenForFileUrl = this.issuePreviewTokenForFileUrl.bind(this);
+    const buildSameOriginAbsoluteUrl = this.buildSameOriginAbsoluteUrl.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -1159,6 +1091,12 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           }
 
           try {
+            // 仅允许 NocoBase 托管的文件地址，防止把任意地址交给 kkFileView 服务器拉取。
+            if (!isNocoBaseManagedFileUrl(fileUrl)) {
+              ctx.status = 403;
+              ctx.body = { data: { message: 'url-not-allowed' } };
+              return;
+            }
             // 获取数据库中的 kkFileView 配置
             const repo = ctx.db.getRepository('kkfileviewSettings');
             const rows = await repo.find({ sort: ['createdAt'] });
@@ -1166,10 +1104,12 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
 
             // 获取 kkFileView 服务地址
             const host = settings.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST;
-            let targetFileUrl = await resolvePermanentUrl(ctx, fileUrl);
+            // 不解析到外部存储直链：返回同源 /files/ 路径并附加短期令牌，
+            // kkFileView 拉取时经 NocoBase 文件中间件执行 ACL 校验。
+            let targetFileUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl);
             // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给 kkFileView 服务器。
             const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
-            if (token && isNocoBaseManagedFileUrl(targetFileUrl) && !targetFileUrl.includes('token=')) {
+            if (token && !targetFileUrl.includes('token=')) {
               const separator = targetFileUrl.includes('?') ? '&' : '?';
               targetFileUrl = `${targetFileUrl}${separator}token=${encodeURIComponent(token)}`;
             }
@@ -1214,10 +1154,17 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             ctx.body = { data: { message: 'url-required' } };
             return;
           }
-          let directUrl = await resolvePermanentUrl(ctx, fileUrl);
+          if (!isNocoBaseManagedFileUrl(fileUrl)) {
+            ctx.status = 403;
+            ctx.body = { data: { message: 'url-not-allowed' } };
+            return;
+          }
+          // 不解析到外部存储直链：返回同源 /files/ 路径并附加短期令牌，
+          // 第三方服务拉取时经 NocoBase 文件中间件执行 ACL 校验，防止越权读取任意附件。
+          let directUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl);
           // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给第三方预览服务。
           const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
-          if (token && isNocoBaseManagedFileUrl(directUrl) && !directUrl.includes('token=')) {
+          if (token && !directUrl.includes('token=')) {
             const separator = directUrl.includes('?') ? '&' : '?';
             directUrl = `${directUrl}${separator}token=${encodeURIComponent(token)}`;
           }
@@ -1832,6 +1779,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     if (this.app.resourceManager.isDefined('kkfileviewFileViewerDownload')) {
       return;
     }
+    // 资源动作由 koa-compose 调用，不绑定 this，需用闭包显式绑定。
+    const isAdminUser = this.isAdminUser.bind(this);
+    const findOrDownloadFileViewerDist = this.findOrDownloadFileViewerDist.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewFileViewerDownload',
       actions: {
@@ -1839,6 +1789,17 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           ctx.body = globalDownloadProgress;
         },
         download: async (ctx: ActionContext) => {
+          const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+          if (!isAdminUser(currentUser)) {
+            ctx.status = 403;
+            ctx.body = {
+              data: {
+                success: false,
+                message: 'forbidden',
+              },
+            };
+            return;
+          }
           globalDownloadProgress = {
             status: 'searching',
             percent: 5,
@@ -1854,7 +1815,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           const fs = require('fs-extra');
           try {
             const targetDir = path.resolve(__dirname, '../../public/file-viewer');
-            const sourceDir = await this.findOrDownloadFileViewerDist(targetDir);
+            const sourceDir = await findOrDownloadFileViewerDist(targetDir);
 
             if (!await fs.pathExists(sourceDir)) {
               ctx.status = 400;
