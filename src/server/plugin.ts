@@ -3,6 +3,7 @@ import { Plugin } from '@nocobase/server';
 import path from 'path';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
+import dns from 'dns';
 import os from 'os';
 import net from 'net';
 import {
@@ -20,6 +21,8 @@ import {
   buildFileViewerPreviewTokenPayload,
   getPreviewTokenExpiresIn,
   isFileViewerPreviewTokenPayload,
+  isNocoBaseManagedFileUrl,
+  parsePreviewTokenExpiresInToMs,
 } from './previewToken';
 
 type RoleLike = string | {
@@ -280,6 +283,18 @@ export function normalizeSettingsSaveValues(
 }
 
 export class PluginFilePreviewerKkfileviewServer extends Plugin {
+  /** 已签发的短期预览令牌注册表：jti -> { token, userId, expiresAt }，用于退出登录时批量吊销。 */
+  private previewTokenRegistry = new Map<string, { token: string; userId: number | string; expiresAt: number }>();
+
+  /** 令牌签发请求限流记录：userId -> 时间戳列表（滑动窗口）。 */
+  private previewTokenRequestLog = new Map<number | string, number[]>();
+
+  /** 令牌签发限流：每个用户每分钟最多签发次数。 */
+  private static readonly PREVIEW_TOKEN_RATE_LIMIT_MAX = 30;
+
+  /** 令牌签发限流滑动窗口（毫秒）。 */
+  private static readonly PREVIEW_TOKEN_RATE_LIMIT_WINDOW = 60 * 1000;
+
   async load() {
     const servePublicFile = async (ctx: any, next: () => Promise<any>) => {
       const apiPrefix = '/api/kkfileviewPublicAssets/';
@@ -296,7 +311,14 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
 
       if (relPath) {
         const fs = require('fs-extra');
-        const targetFile = path.resolve(__dirname, '../../public', relPath);
+        const publicDir = path.resolve(__dirname, '../../public');
+        const targetFile = path.resolve(publicDir, relPath);
+        // 路径穿越防护：解析后的目标必须位于 public 目录内。
+        if (targetFile !== publicDir && !targetFile.startsWith(`${publicDir}${path.sep}`)) {
+          ctx.status = 403;
+          ctx.body = { error: 'Forbidden' };
+          return;
+        }
         if (await fs.pathExists(targetFile)) {
           const stat = await fs.stat(targetFile);
           if (stat.isFile()) {
@@ -363,6 +385,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     this.registerFileViewerProxyResource();
     this.registerSettingsListResource();
     this.registerPublicAssetsResource();
+    this.registerTokenRevocationHooks();
     this.app.acl.allow('kkfileviewPublicAssets', 'get', 'public');
     this.app.acl.allow('kkfileviewSettings', 'list', 'loggedIn');
     this.app.acl.allow('kkfileviewSettingsSave', 'save', 'loggedIn');
@@ -861,6 +884,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
    * 令牌使用与 NocoBase 会话一致的签名密钥，但带独立 audience/scope，
    * 有效期默认 10 分钟（可被环境变量调整），并且绑定到具体的文件地址，
    * 确保预览地址中的令牌只能临时使用，且每次预览都会签发全新的令牌。
+   * 仅允许为 NocoBase 托管的文件地址签发，避免代理被用作任意 URL 的 SSRF 通道。
    */
   private async issueFileViewerPreviewToken(ctx: ActionContext): Promise<{ token: string; expiresAt: number; expiresIn: string } | null> {
     const values = getActionValues(ctx);
@@ -877,18 +901,19 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       ctx.body = { data: { message: 'unauthenticated' } };
       return null;
     }
-    const resolvedTargetUrl = await this.resolveNocoBasePermanentFileUrl(ctx, fileUrl);
-    const roleName = typeof (ctx as any)?.state?.currentRole === 'string' ? (ctx as any).state.currentRole : undefined;
+    if (this.isPreviewTokenRateLimited(userId)) {
+      ctx.status = 429;
+      ctx.body = { data: { message: 'preview-token-rate-limited' } };
+      return null;
+    }
+    const token = await this.issuePreviewTokenForFileUrl(ctx, fileUrl);
+    if (!token) {
+      ctx.status = 403;
+      ctx.body = { data: { message: 'url-not-allowed' } };
+      return null;
+    }
     const expiresIn = getPreviewTokenExpiresIn();
-    const payload = buildFileViewerPreviewTokenPayload(userId, {
-      roleName,
-      targetUrl: resolvedTargetUrl || fileUrl,
-    });
-    const token = (this.app as any).authManager.jwt.sign(payload, {
-      expiresIn,
-      jwtid: crypto.randomUUID(),
-    });
-    let expiresAt = Date.now() + 10 * 60 * 1000;
+    let expiresAt = Date.now() + parsePreviewTokenExpiresInToMs(expiresIn);
     try {
       const decoded = await (this.app as any).authManager.jwt.decode(token);
       if (decoded && typeof decoded === 'object' && typeof (decoded as any).exp === 'number') {
@@ -900,6 +925,100 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     return { token, expiresAt, expiresIn };
   }
 
+  /**
+   * 为指定文件地址签发短期预览令牌（不写 ctx）。
+   * 令牌绑定的是源文件地址（NocoBase 托管路径），代理侧据此校验一致性。
+   * 非 NocoBase 托管地址或未登录时返回 null。
+   */
+  private async issuePreviewTokenForFileUrl(ctx: ActionContext, fileUrl: string): Promise<string | null> {
+    if (!isNocoBaseManagedFileUrl(fileUrl)) return null;
+    const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+    const userId = (currentUser as any)?.id;
+    if (!userId) return null;
+    const roleName = typeof (ctx as any)?.state?.currentRole === 'string' ? (ctx as any).state.currentRole : undefined;
+    const expiresIn = getPreviewTokenExpiresIn();
+    const payload = buildFileViewerPreviewTokenPayload(userId, {
+      roleName,
+      targetUrl: fileUrl,
+    });
+    const token = (this.app as any).authManager.jwt.sign(payload, {
+      expiresIn,
+      jwtid: crypto.randomUUID(),
+    });
+    this.registerPreviewToken(token, userId);
+    return token;
+  }
+
+  /** 登记已签发的预览令牌，供代理校验与退出登录吊销。 */
+  private async registerPreviewToken(token: string, userId: number | string): Promise<void> {
+    this.prunePreviewTokenRegistry();
+    try {
+      const decoded = await (this.app as any).authManager.jwt.decode(token);
+      if (!decoded || typeof decoded !== 'object') return;
+      const jti = String((decoded as any).jti || '');
+      const exp = (decoded as any).exp as number | undefined;
+      if (!jti) return;
+      this.previewTokenRegistry.set(jti, {
+        token,
+        userId,
+        expiresAt: typeof exp === 'number' ? exp * 1000 : Date.now() + 10 * 60 * 1000,
+      });
+    } catch {
+      // 解码失败时忽略登记，令牌自然失效。
+    }
+  }
+
+  /** 清理已过期的令牌登记，避免内存无限增长。 */
+  private prunePreviewTokenRegistry(): void {
+    const now = Date.now();
+    for (const [jti, entry] of this.previewTokenRegistry) {
+      if (entry.expiresAt <= now) {
+        this.previewTokenRegistry.delete(jti);
+      }
+    }
+  }
+
+  /** 吊销指定用户的全部短期预览令牌（加入 NocoBase 令牌黑名单，立即全局失效）。 */
+  private async revokePreviewTokensForUser(userId: number | string): Promise<void> {
+    for (const [jti, entry] of this.previewTokenRegistry) {
+      if (entry.userId !== userId) continue;
+      try {
+        await (this.app as any).authManager.jwt.block(entry.token);
+      } catch {
+        // 忽略单个令牌吊销失败。
+      }
+      this.previewTokenRegistry.delete(jti);
+    }
+  }
+
+  /**
+   * 注册退出登录事件钩子：用户登出时吊销其全部预览令牌，
+   * 避免短期令牌在登出后仍可被用于拉取文件。
+   */
+  private registerTokenRevocationHooks(): void {
+    (this.app as any).on?.('auth:signOut', ({ ctx }: { ctx: any }) => {
+      const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+      const userId = (currentUser as any)?.id;
+      if (userId == null) return;
+      void this.revokePreviewTokensForUser(userId);
+    });
+  }
+
+  /** 令牌签发限流：每个用户每分钟最多签发 PREVIEW_TOKEN_RATE_LIMIT_MAX 次。 */
+  private isPreviewTokenRateLimited(userId: number | string): boolean {
+    const now = Date.now();
+    const window = PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_WINDOW;
+    const max = PluginFilePreviewerKkfileviewServer.PREVIEW_TOKEN_RATE_LIMIT_MAX;
+    const recent = (this.previewTokenRequestLog.get(userId) || []).filter((t) => now - t < window);
+    if (recent.length >= max) {
+      this.previewTokenRequestLog.set(userId, recent);
+      return true;
+    }
+    recent.push(now);
+    this.previewTokenRequestLog.set(userId, recent);
+    return false;
+  }
+
   private async resolveNocoBasePermanentFileUrl(ctx: any, fileUrl: string): Promise<string> {
     const urlString = String(fileUrl || '').trim();
     if (!urlString) return urlString;
@@ -908,10 +1027,12 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     const match = urlString.match(/\/files\/([^\/]+)\/([^\/]+)\/([^\/]+)\/(\d+)(?:\.([a-z0-9]+))?/i);
     if (match && ctx?.db) {
       const [, appName, dataSourceKey, tableName, fileId] = match;
-      
+      // 表名必须为合法标识符，防止拼接进原生 SQL 造成注入。
+      const isValidTableName = /^[A-Za-z0-9_]+$/.test(tableName || '');
+
       // 方案 A: 使用 Sequelize 原生 SQL 联查（100% 准确提取数据库中存好的 baseUrl 与 filename）
       try {
-        if (ctx.db.sequelize && typeof ctx.db.sequelize.query === 'function') {
+        if (isValidTableName && ctx.db.sequelize && typeof ctx.db.sequelize.query === 'function') {
           const sql = `SELECT a.filename, a.name, a.path, a.url, s.baseUrl, s.baseurl, s.options
                        FROM ${tableName} a 
                        LEFT JOIN storages s ON (a.storageId = s.id OR a.storage_id = s.id)
@@ -1015,6 +1136,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     }
     const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
     const issuePreviewToken = this.issueFileViewerPreviewToken.bind(this);
+    const issuePreviewTokenForFileUrl = this.issuePreviewTokenForFileUrl.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -1045,8 +1167,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             // 获取 kkFileView 服务地址
             const host = settings.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST;
             let targetFileUrl = await resolvePermanentUrl(ctx, fileUrl);
-            const token = (ctx as any)?.auth?.token || (ctx as any)?.state?.token;
-            if (token && (targetFileUrl.includes('/files/') || targetFileUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(targetFileUrl)) && !targetFileUrl.includes('token=')) {
+            // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给 kkFileView 服务器。
+            const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
+            if (token && isNocoBaseManagedFileUrl(targetFileUrl) && !targetFileUrl.includes('token=')) {
               const separator = targetFileUrl.includes('?') ? '&' : '?';
               targetFileUrl = `${targetFileUrl}${separator}token=${encodeURIComponent(token)}`;
             }
@@ -1092,8 +1215,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             return;
           }
           let directUrl = await resolvePermanentUrl(ctx, fileUrl);
-          const token = (ctx as any)?.auth?.token || (ctx as any)?.state?.token;
-          if (token && (directUrl.includes('/files/') || directUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(directUrl)) && !directUrl.includes('token=')) {
+          // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给第三方预览服务。
+          const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
+          if (token && isNocoBaseManagedFileUrl(directUrl) && !directUrl.includes('token=')) {
             const separator = directUrl.includes('?') ? '&' : '?';
             directUrl = `${directUrl}${separator}token=${encodeURIComponent(token)}`;
           }
@@ -1145,7 +1269,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           const repo = ctx.db.getRepository('kkfileviewSettings');
           const rows = await repo.find({ sort: ['createdAt'] });
           const settings = (rows?.[0] || {}) as HealthCheckSettings;
-          if (!isAllowedHealthCheckTarget(target, service, settings)) {
+          const isTargetAllowed = await isAllowedHealthCheckTarget(target, service, settings);
+          if (!isTargetAllowed) {
             ctx.status = 403;
             ctx.body = {
               data: {
@@ -1289,14 +1414,58 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     return roleTokens.some((token) => token === 'admin' || token === 'root' || token.includes('admin'));
   }
 
-  private isAllowedHealthCheckTarget(target: string, _service: string, _settings: HealthCheckSettings): boolean {
+  /** 判断 IP 是否为内网/环回/链路本地/云元数据等不可信地址。 */
+  private isPrivateOrReservedIp(hostname: string): boolean {
+    const ipVersion = net.isIP(hostname);
+    if (ipVersion === 4) {
+      const parts = hostname.split('.').map(Number);
+      const [a, b] = parts;
+      if (a === 0 || a === 10 || a === 127) return true; // 保留段/私网/环回
+      if (a === 169 && b === 254) return true; // 链路本地（含云元数据 169.254.169.254）
+      if (a === 172 && b >= 16 && b <= 31) return true; // 私网 172.16-31
+      if (a === 192 && b === 168) return true; // 私网 192.168
+      if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+      if (a >= 224) return true; // 组播/保留
+      return false;
+    }
+    if (ipVersion === 6) {
+      const lower = hostname.toLowerCase();
+      if (lower === '::1' || lower === '::') return true; // 环回/未指定
+      if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // ULA
+      if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true; // 链路本地 fe80::/10
+      return false;
+    }
+    return false;
+  }
+
+  private async isAllowedHealthCheckTarget(target: string, _service: string, _settings: HealthCheckSettings): Promise<boolean> {
     if (!/^https?:\/\//i.test(target)) return false;
+    let parsed: URL;
     try {
-      const parsed = new URL(target);
-      return Boolean(parsed.hostname);
+      parsed = new URL(target);
     } catch {
       return false;
     }
+    const hostname = parsed.hostname.toLowerCase();
+    if (!hostname) return false;
+    if (hostname === 'localhost') return false;
+    // 字面 IP 直接校验；域名则解析 DNS 后逐个校验，防止域名反解指向内网。
+    let addresses: string[] = [];
+    if (net.isIP(hostname)) {
+      addresses = [hostname];
+    } else {
+      try {
+        const resolved = await dns.promises.lookup(hostname, { all: true });
+        addresses = resolved.map((r) => r.address);
+      } catch {
+        return false;
+      }
+    }
+    if (addresses.length === 0) return false;
+    for (const ip of addresses) {
+      if (this.isPrivateOrReservedIp(ip)) return false;
+    }
+    return true;
   }
 
   private async ensureDefaultRecord() {
@@ -1807,8 +1976,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     if (this.app.resourceManager.isDefined('kkfileviewFileViewerProxy')) {
       return;
     }
-    const resolvePermanentUrl = this.resolveNocoBasePermanentFileUrl.bind(this);
     const decodeToken = (this.app as any).authManager.jwt.decode.bind((this.app as any).authManager.jwt);
+    const previewTokenRegistry = this.previewTokenRegistry;
     this.app.resourceManager.define({
       name: 'kkfileviewFileViewerProxy',
       actions: {
@@ -1821,15 +1990,31 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             return;
           }
           try {
-            let targetUrl = await resolvePermanentUrl(ctx, fileUrl);
+            // 仅允许 NocoBase 托管的文件地址，防止代理被用作任意 URL 的 SSRF 通道。
+            if (!isNocoBaseManagedFileUrl(fileUrl)) {
+              ctx.status = 403;
+              ctx.body = { data: { message: 'url-not-allowed' } };
+              return;
+            }
+            // 不解析到外部存储直链：改为请求 NocoBase 自身的 /files/ 或 /storage/ 路径，
+            // 由 NocoBase 文件中间件执行 ACL 校验后再 302 跳转到存储地址，axios 跟随重定向获取文件。
+            let targetUrl = fileUrl;
+            try {
+              const parsed = new URL(targetUrl, 'http://localhost');
+              targetUrl = parsed.pathname + parsed.search;
+            } catch {
+              // 保持原样。
+            }
             // 仅接受短期预览令牌访问，避免在预览地址中长期暴露用户会话令牌。
             const rawToken = String(values.token || '').trim();
             let previewPayload: Record<string, unknown> | null = null;
+            let previewJti = '';
             if (rawToken) {
               try {
                 const decoded = await decodeToken(rawToken);
                 if (isFileViewerPreviewTokenPayload(decoded)) {
                   previewPayload = (decoded as Record<string, unknown>) || null;
+                  previewJti = String((decoded as any)?.jti || '');
                 }
               } catch {
                 previewPayload = null;
@@ -1840,8 +2025,15 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
               ctx.body = { data: { message: 'file-viewer-preview-token-required' } };
               return;
             }
+            // 令牌必须由本服务签发（注册表存在）且未被吊销。
+            if (!previewJti || !previewTokenRegistry.has(previewJti)) {
+              ctx.status = 403;
+              ctx.body = { data: { message: 'file-viewer-preview-token-revoked' } };
+              return;
+            }
             const boundTargetUrl = String(previewPayload.targetUrl || '').trim();
-            if (boundTargetUrl && boundTargetUrl !== targetUrl) {
+            // 绑定校验：令牌绑定的是签发时的源文件地址，必须与本次请求一致。
+            if (boundTargetUrl && boundTargetUrl !== fileUrl) {
               ctx.status = 403;
               ctx.body = { data: { message: 'file-viewer-preview-token-mismatch' } };
               return;
@@ -1900,7 +2092,14 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             return;
           }
           const safeRel = path.normalize(relPath).replace(/^(\.\.[\/\\])+/, '');
-          const targetFile = path.resolve(__dirname, '../../public', safeRel);
+          const publicDir = path.resolve(__dirname, '../../public');
+          const targetFile = path.resolve(publicDir, safeRel);
+          // 路径穿越防护：解析后的目标必须位于 public 目录内。
+          if (targetFile !== publicDir && !targetFile.startsWith(`${publicDir}${path.sep}`)) {
+            ctx.status = 403;
+            ctx.body = { error: 'Forbidden' };
+            return;
+          }
           const fs = require('fs-extra');
           if (await fs.pathExists(targetFile)) {
             const stat = await fs.stat(targetFile);

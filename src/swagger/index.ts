@@ -16,7 +16,11 @@ export default {
     },
     {
       name: 'kkfileviewPreview',
-      description: '预览地址生成接口',
+      description: '预览地址生成与短期令牌签发接口',
+    },
+    {
+      name: 'kkfileviewFileViewerProxy',
+      description: 'File Viewer 文件代理接口',
     },
     {
       name: 'kkfileviewModificationRecords',
@@ -184,6 +188,130 @@ export default {
           },
           400: {
             description: '请求参数错误（如缺少 url）',
+          },
+        },
+      },
+    },
+    '/kkfileviewPreview:resolveDirectUrl': {
+      get: {
+        tags: ['kkfileviewPreview'],
+        summary: '解析文件直链（NocoBase 托管地址附加短期预览令牌）',
+        parameters: [
+          {
+            name: 'url',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）',
+          },
+        ],
+        responses: {
+          200: {
+            description: '解析成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      type: 'object',
+                      properties: {
+                        directUrl: { type: 'string' },
+                        originalUrl: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: '请求参数错误（如缺少 url）',
+          },
+        },
+      },
+    },
+    '/kkfileviewPreview:createFileViewerToken': {
+      get: {
+        tags: ['kkfileviewPreview'],
+        summary: '签发 File Viewer 短期预览令牌（绑定文件地址，默认 10 分钟）',
+        parameters: [
+          {
+            name: 'url',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/），拒绝任意外部地址',
+          },
+        ],
+        responses: {
+          200: {
+            description: '签发成功',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: {
+                      type: 'object',
+                      properties: {
+                        token: { type: 'string' },
+                        expiresAt: { type: 'number' },
+                        expiresIn: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: '请求参数错误（如缺少 url）',
+          },
+          401: {
+            description: '未登录',
+          },
+          403: {
+            description: 'URL 不在允许范围（非 NocoBase 托管地址）',
+          },
+          429: {
+            description: '签发过于频繁，触发限流',
+          },
+        },
+      },
+    },
+    '/kkfileviewFileViewerProxy:get': {
+      get: {
+        tags: ['kkfileviewFileViewerProxy'],
+        summary: 'File Viewer 文件代理（仅接受短期预览令牌，且仅限 NocoBase 托管文件）',
+        parameters: [
+          {
+            name: 'url',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）',
+          },
+          {
+            name: 'token',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            description: '短期预览令牌（由 kkfileviewPreview:createFileViewerToken 签发）',
+          },
+        ],
+        responses: {
+          200: {
+            description: '文件内容流',
+          },
+          400: {
+            description: '请求参数错误（如缺少 url）',
+          },
+          403: {
+            description: '令牌无效/已吊销/与请求文件不匹配，或 URL 不在允许范围',
+          },
+          502: {
+            description: '代理拉取源文件失败',
           },
         },
       },

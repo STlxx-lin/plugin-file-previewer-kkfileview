@@ -4,7 +4,8 @@ const { execSync } = require('child_process');
 
 const pluginDir = path.resolve(__dirname, '../');
 const pkgJsonPath = path.resolve(pluginDir, 'package.json');
-const rootDir = path.resolve(__dirname, '../../../../');
+// 从 scripts 目录向上 5 级到达仓库根目录（存放 build/tar 脚本的 package.json）
+const rootDir = path.resolve(__dirname, '../../../../..');
 
 function runCmd(cmd, cwd, env = {}) {
   console.log(`[Executing] ${cmd}`);

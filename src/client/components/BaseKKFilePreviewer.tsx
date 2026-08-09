@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip, Watermark } from 'antd';
+import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
 import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
@@ -15,8 +15,7 @@ import {
 } from '../configCache';
 import { useKkfileviewConfig } from '../useKkfileviewConfig';
 import { resolveWatermarkTemplate } from '../watermarkTemplate';
-import { resolveFileUrl, isFileViewerProxyUrl } from '../runtimeUrl';
-import { buildFileViewerProxyUrl } from '../runtimeUrl';
+import { buildFileViewerProxyUrl, isFileViewerProxyUrl, resolveFileUrl } from '../runtimeUrl';
 import { DEFAULT_EXTENSIONS, DEFAULT_FILE_VIEWER_EXTENSIONS, DEFAULT_MICROSOFT_EXTENSIONS } from '../../shared/constants';
 
 function escapeHtml(str: string): string {
@@ -30,6 +29,15 @@ function escapeHtml(str: string): string {
     };
     return map[c] ?? c;
   });
+}
+
+/**
+ * 将值序列化为可安全嵌入 <script> 块的 JSON。
+ * JSON.stringify 不转义 `<`，若直接拼进 script 标签，
+ * 内容中的 `</script>` 会提前闭合标签造成 XSS，因此统一转义为 \u003c。
+ */
+function safeScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
 }
 
 function isImageFile(url: string = '') {
@@ -259,6 +267,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const isOpen = typeof open === 'boolean' ? open : index !== null && index !== undefined;
   const t = adapters.useT();
   const api = adapters.useAPIClient();
+  // 短期预览令牌：所有预览模式统一使用，替代把长期会话令牌附加到预览地址。
+  const [previewToken, setPreviewToken] = useState<string | null>(null);
 
   const fetchFileWithAuth = useCallback<FileViewerFetchFileFn>(async ({ url, signal }) => {
     try {
@@ -271,9 +281,9 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       if (!isExternalCdn && !isProxyTarget) {
         if (api.auth.token) {
           headers['Authorization'] = `Bearer ${api.auth.token}`;
-          if (!targetUrl.includes('token=')) {
+          if (previewToken && !targetUrl.includes('token=')) {
             const separator = targetUrl.includes('?') ? '&' : '?';
-            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(api.auth.token)}`;
+            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(previewToken)}`;
           }
         }
         if (api.auth.role) {
@@ -295,7 +305,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       console.error('[fileViewer] fetch file error:', e);
       throw e;
     }
-  }, [api]);
+  }, [api, previewToken]);
 
   const fileDisplayTitle = useMemo(() => resolveFileDisplayTitle(file), [file?.title, file?.name, file?.filename, file?.originalname, file?.url]);
 
@@ -378,6 +388,14 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     return { fullUrl, isImg, isPdf, ext };
   }, [file, kkfileviewConfig.nocobaseHost]);
 
+  // 服务端只接受 NocoBase 托管地址（/files/ 永久地址或 /storage/ 本地地址），
+  // 优先使用附件记录的永久地址，避免把外部存储直链/任意地址交给服务端解析。
+  const fileViewerSourceUrl = useMemo(() => {
+    const raw = String(file?.url || '').trim();
+    if (raw && (raw.includes('/files/') || /^\/?files\//i.test(raw))) return raw;
+    return fileMeta.fullUrl;
+  }, [file?.url, fileMeta.fullUrl]);
+
   const viewerFileName = useMemo(() => {
     const title = fileDisplayTitle || 'file';
     if (fileMeta.ext && !title.toLowerCase().endsWith(`.${fileMeta.ext.toLowerCase()}`)) {
@@ -425,7 +443,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       setResolvedDirectFileUrl('');
       return;
     }
-    const rawTarget = attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
+    const rawTarget = attachTokenToNocoFileUrl(fileMeta.fullUrl, previewToken);
     if (!rawTarget.includes('/files/')) {
       setResolvedDirectFileUrl(rawTarget);
       return;
@@ -434,7 +452,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     api.request({
       url: 'kkfileviewPreview:resolveDirectUrl',
       method: 'get',
-      params: { url: fileMeta.fullUrl },
+      params: { url: fileViewerSourceUrl },
       skipNotify: true,
     }).then((res: any) => {
       if (isMounted) {
@@ -462,7 +480,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     return () => {
       isMounted = false;
     };
-  }, [isOpen, fileMeta.fullUrl, api.auth.token, api]);
+  }, [isOpen, fileMeta.fullUrl, fileViewerSourceUrl, previewToken, api]);
 
   const activeTargetFileUrl = useMemo(() => {
     if (resolvedDirectFileUrl) {
@@ -471,8 +489,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     if (fileMeta.fullUrl.includes('/files/')) {
       return '';
     }
-    return attachTokenToNocoFileUrl(fileMeta.fullUrl, api.auth.token);
-  }, [resolvedDirectFileUrl, fileMeta.fullUrl, api.auth.token]);
+    return attachTokenToNocoFileUrl(fileMeta.fullUrl, previewToken);
+  }, [resolvedDirectFileUrl, fileMeta.fullUrl, previewToken]);
 
   const previewUrlMap = useMemo(
     () =>
@@ -562,14 +580,16 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         }
         try {
           const officeUrl = new URL(serviceConfigMap.microsoft.host);
-          officeUrl.searchParams.set('src', fileMeta.fullUrl);
+          // Microsoft 服务器需要直接拉取源文件，附加短期预览令牌使其能访问受保护文件。
+          const officeSrc = attachTokenToNocoFileUrl(fileMeta.fullUrl, previewToken) || fileMeta.fullUrl;
+          officeUrl.searchParams.set('src', officeSrc);
           acc[service.key] = officeUrl.href;
         } catch {
           acc[service.key] = '';
         }
         return acc;
       }, {} as Record<PreviewService, string>),
-    [fileMeta.fullUrl, fileMeta.ext, activeTargetFileUrl, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType]
+    [fileMeta.fullUrl, fileMeta.ext, activeTargetFileUrl, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType, previewToken]
   );
 
   const resolvedPreviewUrl = useMemo(() => {
@@ -611,12 +631,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       try {
         const headers: HeadersInit = {};
         let targetUrl = resolvedPreviewUrl;
-        const token = api.auth.token;
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-          if (!targetUrl.includes('token=')) {
+        if (api.auth.token) {
+          headers['Authorization'] = `Bearer ${api.auth.token}`;
+          if (previewToken && !targetUrl.includes('token=')) {
             const separator = targetUrl.includes('?') ? '&' : '?';
-            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(token)}`;
+            targetUrl = `${targetUrl}${separator}token=${encodeURIComponent(previewToken)}`;
           }
         }
         const resp = await fetch(targetUrl, { headers });
@@ -644,21 +663,20 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [needsInlineBlobFetch, resolvedPreviewUrl, api.auth.token, iframeRetrySeed]);
+  }, [needsInlineBlobFetch, resolvedPreviewUrl, api.auth.token, previewToken, iframeRetrySeed]);
 
   const effectivePreviewUrl = needsInlineBlobFetch ? inlinePreviewBlobUrl : resolvedPreviewUrl;
-  const [fileViewerPreviewToken, setFileViewerPreviewToken] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setFileViewerPreviewToken(null);
-    if (!isOpen || (previewMode as string) !== 'fileViewer' || !fileMeta.fullUrl) {
+    setPreviewToken(null);
+    if (!isOpen || !fileMeta.fullUrl) {
       return undefined;
     }
     api.request({
       url: 'kkfileviewPreview:createFileViewerToken',
       method: 'get',
-      params: { url: fileMeta.fullUrl },
+      params: { url: fileViewerSourceUrl },
       skipNotify: true,
     })
       .then((res: any) => {
@@ -676,8 +694,8 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         };
         const token = findToken(res);
         if (token) {
-          setFileViewerPreviewToken(token);
-        } else {
+          setPreviewToken(token);
+        } else if ((previewMode as string) === 'fileViewer') {
           iframeLoadedRef.current = false;
           setIframeLoadFailed(true);
           setIframeLoading(false);
@@ -685,18 +703,20 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       })
       .catch(() => {
         if (cancelled) return;
-        iframeLoadedRef.current = false;
-        setIframeLoadFailed(true);
-        setIframeLoading(false);
+        if ((previewMode as string) === 'fileViewer') {
+          iframeLoadedRef.current = false;
+          setIframeLoadFailed(true);
+          setIframeLoading(false);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [isOpen, previewMode, fileMeta.fullUrl, api]);
+  }, [isOpen, previewMode, fileMeta.fullUrl, fileViewerSourceUrl, api]);
 
   const fileViewerProxyUrl = useMemo(
-    () => buildFileViewerProxyUrl(fileMeta.fullUrl, fileViewerPreviewToken),
-    [fileMeta.fullUrl, fileViewerPreviewToken]
+    () => buildFileViewerProxyUrl(fileViewerSourceUrl, previewToken),
+    [fileViewerSourceUrl, previewToken]
   );
   const [fileViewerProgress, setFileViewerProgress] = useState<number>(0);
   const fileViewerProgressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -819,11 +839,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         );
         const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
         const safeTitle = escapeHtml(viewerFileName);
-        const safeFileUrl = JSON.stringify(fileViewerProxyUrl || fileMeta.fullUrl);
-        const safeFileName = JSON.stringify(viewerFileName);
-        const safeAssetBase = JSON.stringify(resolvedAssetBase);
+        const safeFileUrl = safeScriptJson(fileViewerProxyUrl || fileMeta.fullUrl);
+        const safeFileName = safeScriptJson(viewerFileName);
+        const safeAssetBase = safeScriptJson(resolvedAssetBase);
         const safeWatermarkConfig = watermarkText
-          ? JSON.stringify({
+          ? safeScriptJson({
               text: watermarkText,
               opacity: typeof kkfileviewConfig.watermarkOpacity === 'number' ? kkfileviewConfig.watermarkOpacity : 0.18,
               color: kkfileviewConfig.watermarkColor || 'rgba(0, 0, 0, 0.18)',
@@ -1115,17 +1135,18 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   }, [onClose, onOpenChange]);
 
   // 使用捕获阶段监听 Esc：File Viewer 的阴影 DOM 可能吞掉按键事件导致
-  // antd Modal 自带的 Esc 关闭失效，捕获阶段监听可以保证始终能关闭预览弹窗。
+  // antd Modal 自带的 Esc 关闭失效。仅在预览失败/卡死时接管，避免劫持
+  // viewer 内部自身的 Esc 行为（如取消表格编辑、关闭图片灯箱等）。
   useEffect(() => {
     if (!isOpen) return undefined;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !embedConfigVisible) {
+      if (e.key === 'Escape' && !embedConfigVisible && iframeLoadFailed) {
         handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, embedConfigVisible, handleClose]);
+  }, [isOpen, embedConfigVisible, iframeLoadFailed, handleClose]);
 
   const handleDownload = useCallback(() => {
     if (kkfileviewConfig.enableDownload === false) {
@@ -1136,8 +1157,10 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       message.error(t('File URL is empty'));
       return;
     }
-    saveAs(fileMeta.fullUrl, fileDisplayTitle);
-  }, [kkfileviewConfig.enableDownload, fileMeta.fullUrl, fileDisplayTitle, t]);
+    // NocoBase 托管的文件需要鉴权，附加短期预览令牌后再下载。
+    const downloadUrl = attachTokenToNocoFileUrl(fileMeta.fullUrl, previewToken) || fileMeta.fullUrl;
+    saveAs(downloadUrl, fileDisplayTitle);
+  }, [kkfileviewConfig.enableDownload, fileMeta.fullUrl, fileDisplayTitle, previewToken, t]);
 
   const modalWidth = useMemo(() => (useMobileFullscreenLayout ? '100vw' : '82vw'), [useMobileFullscreenLayout]);
 
@@ -1201,7 +1224,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
             </div>
           ) : (previewMode as string) === 'fileViewer' ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              {resolvedPreviewUrl && fileViewerPreviewToken ? (
+              {resolvedPreviewUrl && previewToken ? (
                 <ViewerErrorBoundary
                   key={`fv-${iframeRetrySeed}`}
                   onError={() => {

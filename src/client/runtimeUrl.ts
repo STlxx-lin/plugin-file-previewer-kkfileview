@@ -84,10 +84,10 @@ export function getApiBaseUrl(): string {
 
 /**
  * 判断给定地址是否为 File Viewer 代理接口地址。
- * 代理接口通过独立的短期预览令牌鉴权，客户端应避免在此类地址上附加用户会话令牌。
+ * 精确匹配代理 action 路径，避免包含同名关键字的普通地址被误判。
  */
 export function isFileViewerProxyUrl(url: unknown): boolean {
-  return String(url || '').includes(FILE_VIEWER_PROXY_PATH_KEYWORD);
+  return String(url || '').includes(`${FILE_VIEWER_PROXY_PATH_KEYWORD}:get`);
 }
 
 /**

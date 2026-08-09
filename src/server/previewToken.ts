@@ -37,6 +37,43 @@ export function getPreviewTokenExpiresIn(rawValue: string = ''): string {
 }
 
 /**
+ * 将有效期字符串（`n` 秒 / `nm` 分钟）转换为毫秒。
+ * 格式非法时回退到默认 10 分钟，供服务端计算过期时间兜底。
+ */
+export function parsePreviewTokenExpiresInToMs(expiresIn: string = ''): number {
+  const matched = /^(\d+)([sm])$/.exec(String(expiresIn || '').trim());
+  if (!matched) return 10 * 60 * 1000;
+  const seconds = Number(matched[1]) * (matched[2] === 'm' ? 60 : 1);
+  return seconds * 1000;
+}
+
+/**
+ * 判断是否为 NocoBase 托管的文件地址。
+ * 仅允许两种形态，防止代理被用作任意 URL 的 SSRF 通道：
+ * 1. 永久文件路径 `/files/{app}/{dataSource}/{collection}/{id}(.ext)`；
+ * 2. 本地存储路径 `/storage/...`。
+ * 其余（任意 http(s) 地址、内网 IP、云元数据地址等）一律拒绝。
+ */
+export function isNocoBaseManagedFileUrl(url: unknown): boolean {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+  let pathname = raw;
+  try {
+    pathname = new URL(raw, 'http://localhost').pathname;
+  } catch {
+    // 无法解析时按原值处理。
+  }
+  const segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean);
+  if (segments.length >= 5 && segments[0] === 'files' && /^\d+(\.\w+)?$/.test(segments[4] || '')) {
+    return true;
+  }
+  if (segments.length >= 2 && segments[0] === 'storage') {
+    return true;
+  }
+  return false;
+}
+
+/**
  * 构建 File Viewer 预览令牌的 JWT 负载。
  * 令牌绑定当前用户、目标文件地址与预览作用域，配合短有效期实现临时使用。
  */
@@ -67,7 +104,8 @@ export function isFileViewerPreviewTokenPayload(decoded: unknown): boolean {
 
 /**
  * 判断给定地址是否为 File Viewer 代理接口地址。
+ * 精确匹配代理 action 路径，避免包含同名关键字的普通地址被误判。
  */
 export function isFileViewerProxyUrl(url: unknown): boolean {
-  return String(url || '').includes(FILE_VIEWER_PROXY_PATH_KEYWORD);
+  return String(url || '').includes(`${FILE_VIEWER_PROXY_PATH_KEYWORD}:get`);
 }

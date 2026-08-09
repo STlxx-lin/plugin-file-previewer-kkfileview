@@ -74,6 +74,7 @@ describe('runtimeUrl', () => {
   it('isFileViewerProxyUrl 识别 File Viewer 代理地址', () => {
     expect(isFileViewerProxyUrl(`/api/${FILE_VIEWER_PROXY_PATH_KEYWORD}:get?url=1`)).toBe(true);
     expect(isFileViewerProxyUrl(`http://localhost:13000/api/${FILE_VIEWER_PROXY_PATH_KEYWORD}:get`)).toBe(true);
+    expect(isFileViewerProxyUrl(`/api/${FILE_VIEWER_PROXY_PATH_KEYWORD}`)).toBe(false);
     expect(isFileViewerProxyUrl('/files/main/main/attachments/13.pdf')).toBe(false);
     expect(isFileViewerProxyUrl('')).toBe(false);
   });
