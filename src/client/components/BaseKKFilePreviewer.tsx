@@ -1182,7 +1182,13 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
   const handleClose = useCallback(() => {
     if (onClose) onClose();
     if (onOpenChange) onOpenChange(false);
-  }, [onClose, onOpenChange]);
+    // 宿主未受控场景（attachmentFileTypes 路径只传 index/list/onSwitchIndex，
+    // 不传 open/onOpenChange/onClose）：只能通过 onSwitchIndex(null) 让宿主
+    // 清空索引并卸载预览器，与 @nocobase/client 内置图片预览器的关闭约定保持一致。
+    if (typeof open !== 'boolean' && onSwitchIndex) {
+      onSwitchIndex(null);
+    }
+  }, [onClose, onOpenChange, open, onSwitchIndex]);
 
   // 使用捕获阶段监听 Esc：File Viewer 的阴影 DOM 可能吞掉按键事件导致
   // antd Modal 自带的 Esc 关闭失效。仅在预览失败/卡死时接管，避免劫持
