@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'; // 引入 Vitest 的生命周期、分组、断言与桩工具。
-import { resolveFileViewerAssetBase } from '../fileViewerRuntime'; // 引入待实现的 File Viewer 资源路径解析函数。
+import {
+  FILE_VIEWER_CDN_DIST_BASE,
+  FILE_VIEWER_SCRIPT_NAME,
+  buildFileViewerScriptUrls,
+  isFileViewerLocalAssetUnavailable,
+  markFileViewerLocalAssetUnavailable,
+  resolveFileViewerAssetBase,
+} from '../fileViewerRuntime'; // 引入待实现的 File Viewer 资源路径解析函数。
 
 afterEach(() => { // 在每个测试结束后恢复全局桩状态。
   vi.unstubAllGlobals(); // 清理对 window 等全局对象的临时替换。
@@ -80,5 +87,31 @@ describe('fileViewerRuntime', () => { // 定义 fileViewer 运行时工具测试
 
   it('should auto migrate explicit unpkg URL to domestic npmmirror URL', () => {
     expect(resolveFileViewerAssetBase('https://unpkg.com/@file-viewer/web-full@2.2.2/dist/')).toBe('https://registry.npmmirror.com/@file-viewer/web-full/2.2.2/files/dist/');
+  });
+
+  describe('buildFileViewerScriptUrls', () => {
+    it('本地资源基址返回 本地优先 + CDN 兜底 两个地址', () => {
+      const urls = buildFileViewerScriptUrls('http://localhost:13000/api/kkfileviewPublicAssets/file-viewer/');
+      expect(urls).toEqual([
+        'http://localhost:13000/api/kkfileviewPublicAssets/file-viewer/flyfish-file-viewer-web-full.iife.js',
+        `${FILE_VIEWER_CDN_DIST_BASE}${FILE_VIEWER_SCRIPT_NAME}`,
+      ]);
+    });
+
+    it('本地资源已知不可用后只返回 CDN 地址', () => {
+      markFileViewerLocalAssetUnavailable();
+      expect(isFileViewerLocalAssetUnavailable()).toBe(true);
+      const urls = buildFileViewerScriptUrls('http://localhost:13000/api/kkfileviewPublicAssets/file-viewer/');
+      expect(urls).toEqual([`${FILE_VIEWER_CDN_DIST_BASE}${FILE_VIEWER_SCRIPT_NAME}`]);
+    });
+
+    it('非本地基址（显式 CDN/自定义地址）只返回该地址', () => {
+      expect(buildFileViewerScriptUrls('https://cdn.example.com/file-viewer/')).toEqual([
+        'https://cdn.example.com/file-viewer/flyfish-file-viewer-web-full.iife.js',
+      ]);
+      expect(buildFileViewerScriptUrls(FILE_VIEWER_CDN_DIST_BASE)).toEqual([
+        `${FILE_VIEWER_CDN_DIST_BASE}${FILE_VIEWER_SCRIPT_NAME}`,
+      ]);
+    });
   });
 }); // 结束 fileViewerRuntime 测试分组。

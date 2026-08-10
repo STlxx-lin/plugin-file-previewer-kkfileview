@@ -72,6 +72,8 @@ const CHINESE_LABEL_TO_KEY_MAP: Record<string, string> = {
   'File Viewer 文件格式': 'fileViewerExtensions',
   '优先预览': 'preferredPreview',
   'BaseMetas 请求类型': 'basemetasRequestType',
+  'BaseMetas 文件获取方式': 'basemetasFileAccess',
+  'kkFileView 文件获取方式': 'kkfileviewFileAccess',
   '新窗口按钮': 'enableOpenInNewWindow',
   '新窗口按鈕': 'enableOpenInNewWindow',
   '全屏按钮': 'enableFullscreenButton',
@@ -102,6 +104,8 @@ export const FIELD_KEY_TO_I18N_LABEL: Record<string, string> = {
   fileViewerExtensions: 'File Viewer File Extensions',
   preferredPreview: 'Preferred Preview Engine',
   basemetasRequestType: 'BaseMetas Request Type',
+  basemetasFileAccess: 'BaseMetas File Access Mode',
+  kkfileviewFileAccess: 'kkFileView File Access Mode',
   enableOpenInNewWindow: 'Enable Open In New Window Button',
   enableFullscreenButton: 'Enable Fullscreen Button',
   enableMobileAutoFullscreen: 'Enable Mobile Auto Fullscreen',
@@ -125,11 +129,13 @@ export const FIELD_CATEGORY_MAP: Record<string, string> = {
   host: 'kkFileView',
   kkfileviewHost: 'kkFileView',
   kkfileviewExtensions: 'kkFileView',
+  kkfileviewFileAccess: 'kkFileView',
   enableKkfileview: 'kkFileView',
 
   basemetasHost: 'BaseMetas',
   basemetasExtensions: 'BaseMetas',
   basemetasRequestType: 'BaseMetas',
+  basemetasFileAccess: 'BaseMetas',
   enableBasemetas: 'BaseMetas',
 
   microsoftHost: 'Microsoft',
@@ -857,6 +863,46 @@ export const BasicSettingsCard = ({
               </div>
             )}
 
+            {/* 2b. BaseMetas 专属：文件获取方式控制 */}
+            {activeService.key === 'basemetas' && (
+              <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
+                <Form.Item
+                  name="basemetasFileAccess"
+                  preserve={true}
+                  label={<Typography.Text strong>{t('BaseMetas File Access Mode')}</Typography.Text>}
+                  extra={t(
+                    'Proxy Mode: file is streamed through the NocoBase proxy (suitable when the object storage is internal-only). Direct Mode: the preview service downloads the file directly from the file server (suitable when the file server is reachable by the preview service).',
+                  )}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group size="middle">
+                    <Radio value="direct">{t('Direct Mode (default, file server accessible)')}</Radio>
+                    <Radio value="proxy">{t('Proxy Mode (via NocoBase)')}</Radio>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+            )}
+
+            {/* 2c. kkFileView 专属：文件获取方式控制 */}
+            {activeService.key === 'kkfileview' && (
+              <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
+                <Form.Item
+                  name="kkfileviewFileAccess"
+                  preserve={true}
+                  label={<Typography.Text strong>{t('kkFileView File Access Mode')}</Typography.Text>}
+                  extra={t(
+                    'Direct Mode: kkFileView downloads the file directly from its real location (suitable when the file server is reachable by kkFileView). Proxy Mode: file is streamed through the NocoBase proxy (suitable when the object storage is internal-only).',
+                  )}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group size="middle">
+                    <Radio value="direct">{t('Direct Mode (default, file server accessible)')}</Radio>
+                    <Radio value="proxy">{t('Proxy Mode (via NocoBase)')}</Radio>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+            )}
+
             {/* 3. File Viewer 专属：离线模式与加载模式 */}
             {activeService.key === 'fileViewer' && (
               <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: '16px' }}>
@@ -865,13 +911,13 @@ export const BasicSettingsCard = ({
                   preserve={true}
                   label={<Typography.Text strong>{t('File Viewer Default Load Mode')}</Typography.Text>}
                   extra={t(
-                    'CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).',
+                    'CDN Mode (default): File Viewer loads its runtime from the public CDN. Static Mode: local static files are served first, and the mode automatically switches to CDN when no local static files exist.',
                   )}
                   style={{ marginBottom: 16 }}
                 >
                   <Radio.Group size="middle">
-                    <Radio value="proxy">{t('Proxy Mode (default, authenticated)')}</Radio>
-                    <Radio value="cdn">{t('CDN Mode (direct link)')}</Radio>
+                    <Radio value="cdn">{t('CDN Mode (default, direct link)')}</Radio>
+                    <Radio value="proxy">{t('Static Mode (local static files)')}</Radio>
                   </Radio.Group>
                 </Form.Item>
 

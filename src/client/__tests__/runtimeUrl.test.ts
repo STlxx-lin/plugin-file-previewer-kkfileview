@@ -67,6 +67,23 @@ describe('runtimeUrl', () => {
     expect(proxy).not.toContain('token=');
   });
 
+  it('buildFileViewerProxyUrl 支持传入公网基础地址（nocobaseHost）', () => {
+    const proxy = buildFileViewerProxyUrl('/files/demo.pdf', 'token_123', 'https://public.example.com');
+    expect(proxy.startsWith('https://public.example.com/')).toBe(true);
+    expect(proxy).toContain(`/api/${FILE_VIEWER_PROXY_PATH_KEYWORD}:get`);
+    expect(proxy).toContain('token=token_123');
+  });
+
+  it('buildFileViewerProxyUrl 基础地址带子路径时正确拼接', () => {
+    const proxy = buildFileViewerProxyUrl('/files/demo.pdf', 'token_123', 'https://public.example.com/nocobase');
+    expect(proxy.startsWith('https://public.example.com/nocobase/api/')).toBe(true);
+  });
+
+  it('buildFileViewerProxyUrl 未配置基础地址时回退到浏览器来源', () => {
+    const proxy = buildFileViewerProxyUrl('/files/demo.pdf', 'token_123');
+    expect(proxy.startsWith('http://localhost:3000/')).toBe(true);
+  });
+
   it('buildFileViewerProxyUrl 对空输入返回空字符串', () => {
     expect(buildFileViewerProxyUrl('', 'token')).toBe('');
   });

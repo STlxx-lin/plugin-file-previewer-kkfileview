@@ -15,6 +15,8 @@ import {
   DEFAULT_FILE_VIEWER_ASSET_BASE,
   DEFAULT_FILE_VIEWER_EXTENSIONS,
   DEFAULT_PREFERRED_PREVIEW,
+  DEFAULT_BASEMETAS_FILE_ACCESS,
+  DEFAULT_KKFILEVIEW_FILE_ACCESS,
 } from '../shared/constants';
 import { resolveWatermarkTemplate } from '../shared/watermarkTemplate';
 import {
@@ -45,6 +47,7 @@ type HealthCheckSettings = {
   kkfileviewHost?: string;
   basemetasHost?: string;
   microsoftHost?: string;
+  nocobaseHost?: string;
   watermarkType?: string;
   watermark?: string;
   watermarkOpacity?: number;
@@ -72,6 +75,8 @@ type KkfileviewSettingsRecord = HealthCheckSettings & {
   enableMobileAutoFullscreen?: boolean;
   enableDownload?: boolean;
   basemetasRequestType?: string;
+  basemetasFileAccess?: string;
+  kkfileviewFileAccess?: string;
   enableCopyEmbedHtml?: boolean;
   copyEmbedHtmlPermission?: string;
   copyEmbedHtmlRoles?: string;
@@ -104,6 +109,7 @@ type ActionContext = {
     user?: CurrentUserLike;
   };
   db: any;
+  app?: any;
   status?: number;
   body?: any;
   set?: (key: string, val: string) => void;
@@ -255,6 +261,10 @@ export function normalizeSettingsSaveValues(
     nocobaseHost: String(values.nocobaseHost ?? fallback.nocobaseHost ?? '').trim(),
     basemetasRequestType:
       (values.basemetasRequestType ?? fallback.basemetasRequestType) === 'base64' ? 'base64' : 'query',
+    basemetasFileAccess:
+      (values.basemetasFileAccess ?? fallback.basemetasFileAccess) === 'proxy' ? 'proxy' : DEFAULT_BASEMETAS_FILE_ACCESS,
+    kkfileviewFileAccess:
+      (values.kkfileviewFileAccess ?? fallback.kkfileviewFileAccess) === 'proxy' ? 'proxy' : DEFAULT_KKFILEVIEW_FILE_ACCESS,
     copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(copyEmbedHtmlPermission)
       ? copyEmbedHtmlPermission
       : 'user',
@@ -275,7 +285,7 @@ export function normalizeSettingsSaveValues(
     ),
     fileViewerExtensions: JSON.stringify(fileViewerExtensions),
     fileViewerLoadMode:
-      (values.fileViewerLoadMode ?? fallback.fileViewerLoadMode) === 'cdn' ? 'cdn' : 'proxy',
+      (values.fileViewerLoadMode ?? fallback.fileViewerLoadMode) === 'proxy' ? 'proxy' : 'cdn',
     enableFileViewer:
       values.enableFileViewer === true ||
       (values.enableFileViewer !== false && fileViewerExtensions.length > 0),
@@ -418,6 +428,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       return;
     }
     // 定义专用保存资源，确保配置保存时显式覆盖数据库中的第一条记录。
+    const autoCorrectFileViewerLoadMode = this.autoCorrectFileViewerLoadMode.bind(this);
+    const isFileViewerDistDownloaded = this.isFileViewerDistDownloaded.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewSettingsSave',
       actions: {
@@ -470,6 +482,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           const refreshedRows = await repo.find({ sort: ['createdAt'] });
           // 取更新后的首条配置作为响应体。
           const refreshedFirst = Array.isArray(refreshedRows) ? refreshedRows[0] : null;
+          // 自动纠偏：用户选择了本地静态模式（proxy）但本地静态文件缺失时，切换为 CDN 模式并同步数据库。
+          await autoCorrectFileViewerLoadMode(ctx, repo, (refreshedFirst || null) as KkfileviewSettingsRecord | null, await isFileViewerDistDownloaded());
           // 按常规 data 包装格式返回保存结果。
           ctx.body = {
             data: refreshedFirst || null,
@@ -939,10 +953,12 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   /**
-   * 将 NocoBase 托管路径（相对或绝对）归一化为与当前请求同源的绝对地址。
+   * 将 NocoBase 托管路径（相对或绝对）归一化为可被外部预览服务访问的绝对地址。
    * 外部存储直链一律不返回，统一经 NocoBase 自身路径访问以应用 ACL 校验。
+   * 配置了系统公共访问地址（nocobaseHost）时优先使用该地址，
+   * 否则回退到当前请求来源，保证第三方服务（如 BaseMetas）能从公网拉取文件。
    */
-  private buildSameOriginAbsoluteUrl(ctx: ActionContext, url: string): string {
+  private buildSameOriginAbsoluteUrl(ctx: ActionContext, url: string, preferredHost: string = ''): string {
     if (!url) return url;
     let pathAndQuery = url;
     try {
@@ -952,12 +968,57 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       // 保持原样。
     }
     if (/^https?:\/\//i.test(pathAndQuery)) return pathAndQuery;
+    const normalizedPreferred = String(preferredHost || '').trim().replace(/\/+$/, '');
+    if (normalizedPreferred && /^https?:\/\//i.test(normalizedPreferred)) {
+      try {
+        const parsedPreferred = new URL(normalizedPreferred);
+        const preferredPublicPath = parsedPreferred.pathname.replace(/\/+$/, '');
+        if (preferredPublicPath && preferredPublicPath !== '/') {
+          pathAndQuery = `${preferredPublicPath}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+        }
+        return `${parsedPreferred.origin}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+      } catch {
+        return `${normalizedPreferred}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+      }
+    }
     const request = (ctx as any)?.request || {};
     const host = request.header?.host || request.host || '';
     const protocol = request.protocol || 'http';
     const publicPath = (ctx as any)?.app?.getAppPublicPath?.() || process.env.APP_PUBLIC_PATH || '/';
     const base = `${protocol}://${host}${publicPath.replace(/\/+$/, '')}`;
     return `${base}${pathAndQuery.startsWith('/') ? '' : '/'}${pathAndQuery}`;
+  }
+
+  /**
+   * 将 NocoBase 托管文件地址解析为存储的真实文件地址。
+   * 复用 file-manager 插件的 getFileURL 计算逻辑（与 /files/ 302 重定向目标一致），
+   * 外部存储（如内网 MinIO/S3、远程文件服务器）返回绝对直链，
+   * 本地存储返回相对路径时统一视为无法直连并返回 null。
+   */
+  private async resolveStorageDirectUrl(ctx: ActionContext, fileUrl: string): Promise<string | null> {
+    try {
+      const parsed = new URL(fileUrl, 'http://localhost');
+      const segments = parsed.pathname.replace(/^\/+/, '').split('/').filter(Boolean);
+      // 永久文件地址形态：/files/{appName}/{dataSourceKey}/{collectionName}/{id}(.ext)
+      if (segments.length < 5 || segments[0] !== 'files') return null;
+      const collectionName = segments[3];
+      const id = String(segments[4] || '').replace(/\.\w+$/, '');
+      if (!collectionName || !id) return null;
+      const fileManager = (ctx.app as any)?.pm?.get?.('file-manager');
+      if (!fileManager || typeof fileManager.getFileURL !== 'function') return null;
+      const repo = ctx.db.getRepository(collectionName);
+      if (!repo) return null;
+      const file = await repo.findOne({
+        filter: { id },
+        fields: ['id', 'storageId', 'path', 'filename', 'extname', 'mimetype', 'url', 'meta'],
+      });
+      if (!file || file.storageId == null) return null;
+      const rawUrl = String((await fileManager.getFileURL(file, false)) || '').trim();
+      if (!/^https?:\/\//i.test(rawUrl)) return null;
+      return rawUrl;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1069,6 +1130,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     const issuePreviewToken = this.issueFileViewerPreviewToken.bind(this);
     const issuePreviewTokenForFileUrl = this.issuePreviewTokenForFileUrl.bind(this);
     const buildSameOriginAbsoluteUrl = this.buildSameOriginAbsoluteUrl.bind(this);
+    const resolveStorageDirectUrl = this.resolveStorageDirectUrl.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -1106,7 +1168,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             const host = settings.kkfileviewHost || DEFAULT_KKFILEVIEW_HOST;
             // 不解析到外部存储直链：返回同源 /files/ 路径并附加短期令牌，
             // kkFileView 拉取时经 NocoBase 文件中间件执行 ACL 校验。
-            let targetFileUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl);
+            // 配置了系统公共访问地址时优先使用，确保外部服务可访问该地址。
+            let targetFileUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl, String(settings.nocobaseHost || ''));
             // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给 kkFileView 服务器。
             const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
             if (token && !targetFileUrl.includes('token=')) {
@@ -1159,9 +1222,26 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             ctx.body = { data: { message: 'url-not-allowed' } };
             return;
           }
-          // 不解析到外部存储直链：返回同源 /files/ 路径并附加短期令牌，
+          // 优先解析为文件存储的真实地址（如内网 MinIO/S3/远程文件服务器），
+          // 第三方预览服务（如 BaseMetas）可直接从文件所在服务器下载，无需访问 NocoBase。
+          const storageUrl = await resolveStorageDirectUrl(ctx, fileUrl);
+          if (storageUrl) {
+            ctx.body = {
+              data: {
+                directUrl: storageUrl,
+                originalUrl: fileUrl,
+              },
+            };
+            return;
+          }
+          // 兜底（本地存储）：不解析到外部存储直链，返回同源 /files/ 路径并附加短期令牌，
           // 第三方服务拉取时经 NocoBase 文件中间件执行 ACL 校验，防止越权读取任意附件。
-          let directUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl);
+          const settings = await (async () => {
+            const repo = ctx.db.getRepository('kkfileviewSettings');
+            const rows = await repo.find({ sort: ['createdAt'] });
+            return (rows?.[0] || {}) as KkfileviewSettingsRecord;
+          })();
+          let directUrl = buildSameOriginAbsoluteUrl(ctx, fileUrl, String(settings.nocobaseHost || ''));
           // 使用短期预览令牌替代用户会话令牌，避免长期令牌泄露给第三方预览服务。
           const token = await issuePreviewTokenForFileUrl(ctx, fileUrl);
           if (token && !directUrl.includes('token=')) {
@@ -1434,9 +1514,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           basemetasExtensions: JSON.stringify(DEFAULT_EXTENSIONS),
           microsoftExtensions: JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS),
           preferKkfileview: false,
-          enableKkfileview: true,
+          enableKkfileview: false,
           enableBasemetas: false,
-          enableMicrosoft: true,
+          enableMicrosoft: false,
           fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
           fileViewerExtensions: JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
           enableFileViewer: true,
@@ -1445,6 +1525,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           enableMobileAutoFullscreen: false,
           enableDownload: true,
           basemetasRequestType: 'query',
+          basemetasFileAccess: DEFAULT_BASEMETAS_FILE_ACCESS,
+          kkfileviewFileAccess: DEFAULT_KKFILEVIEW_FILE_ACCESS,
           enableCopyEmbedHtml: true,
           copyEmbedHtmlPermission: 'user',
           copyEmbedHtmlRoles: '[]',
@@ -1513,15 +1595,18 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       fileViewerExtensions: String(
         normalizedSaveValues.fileViewerExtensions || JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS),
       ),
-      enableKkfileview: first.enableKkfileview ?? true,
-      enableBasemetas: first.enableBasemetas ?? serviceType === 'basemetas',
-      enableMicrosoft: first.enableMicrosoft ?? first.preferKkfileview === false,
+      enableKkfileview: first.enableKkfileview ?? false,
+      enableBasemetas: first.enableBasemetas ?? false,
+      enableMicrosoft: first.enableMicrosoft ?? false,
       enableFileViewer: normalizedSaveValues.enableFileViewer !== false,
       enableOpenInNewWindow: first.enableOpenInNewWindow ?? true,
       enableFullscreenButton: first.enableFullscreenButton ?? true,
       enableMobileAutoFullscreen: first.enableMobileAutoFullscreen ?? false,
       enableDownload: first.enableDownload ?? true,
+      fileViewerLoadMode: String(first.fileViewerLoadMode || 'cdn') === 'proxy' ? 'proxy' : 'cdn',
       basemetasRequestType: normalizedSaveValues.basemetasRequestType === 'base64' ? 'base64' : 'query',
+      basemetasFileAccess: normalizedSaveValues.basemetasFileAccess === 'proxy' ? 'proxy' : DEFAULT_BASEMETAS_FILE_ACCESS,
+      kkfileviewFileAccess: normalizedSaveValues.kkfileviewFileAccess === 'proxy' ? 'proxy' : DEFAULT_KKFILEVIEW_FILE_ACCESS,
       enableCopyEmbedHtml: first.enableCopyEmbedHtml ?? true,
       copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(String(normalizedSaveValues.copyEmbedHtmlPermission))
         ? String(normalizedSaveValues.copyEmbedHtmlPermission)
@@ -1529,7 +1614,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       copyEmbedHtmlRoles: first.copyEmbedHtmlRoles || '[]',
       watermarkType: String(normalizedSaveValues.watermarkType || 'preview'),
       watermark: String(normalizedSaveValues.watermark || ''),
-      preferredPreview: ['microsoft', 'kkfileview', 'basemetas', 'none'].includes(preferredPreview)
+      preferredPreview: ['microsoft', 'kkfileview', 'basemetas', 'fileViewer', 'none'].includes(preferredPreview)
         ? preferredPreview
         : DEFAULT_PREFERRED_PREVIEW,
       // 旧兼容字段：新字段已确认有值后才清空，否则保留原值
@@ -1881,6 +1966,8 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   private registerSettingsListResource() {
+    const autoCorrectFileViewerLoadMode = this.autoCorrectFileViewerLoadMode.bind(this);
+    const isFileViewerDistDownloaded = this.isFileViewerDistDownloaded.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewSettings',
       actions: {
@@ -1889,9 +1976,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           const rows = await repo.find({ sort: ['createdAt'] });
           const list = Array.isArray(rows) ? rows : [];
 
-          const fs = require('fs-extra');
-          const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
-          const isDownloaded = await fs.pathExists(filePath);
+          const isDownloaded = await isFileViewerDistDownloaded();
+          // 自动纠偏：本地静态模式（proxy）但本地静态文件缺失时，切换为 CDN 模式并同步数据库。
+          await autoCorrectFileViewerLoadMode(ctx, repo, (list[0] || null) as KkfileviewSettingsRecord | null, isDownloaded);
 
           const result = list.map(item => {
             const data = item.toJSON ? item.toJSON() : { ...item };
@@ -1931,6 +2018,54 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
         },
       }
     });
+  }
+
+  /** 判断 File Viewer 本地静态文件是否已下载部署。 */
+  private async isFileViewerDistDownloaded(): Promise<boolean> {
+    const fs = require('fs-extra');
+    const filePath = path.resolve(__dirname, '../../public/file-viewer/flyfish-file-viewer-web-full.iife.js');
+    return fs.pathExists(filePath);
+  }
+
+  /**
+   * File Viewer 加载模式自动纠偏：
+   * 本地静态文件模式（proxy）但本地静态文件缺失时，自动切换为 CDN 模式并同步数据库。
+   */
+  private async autoCorrectFileViewerLoadMode(
+    ctx: ActionContext,
+    repo: any,
+    first: KkfileviewSettingsRecord | null,
+    isDownloaded: boolean,
+  ): Promise<void> {
+    if (!first || first.id == null) return;
+    if (String(first.fileViewerLoadMode || '') !== 'proxy' || isDownloaded) return;
+    try {
+      await repo.update({ filterByTk: first.id, values: { fileViewerLoadMode: 'cdn' } });
+      first.fileViewerLoadMode = 'cdn';
+    } catch (error: unknown) {
+      (ctx as any)?.logger?.warn?.(
+        '[kkfileview] auto switch fileViewerLoadMode to cdn failed:',
+        getErrorMessage(error, 'auto-switch-failed'),
+      );
+      return;
+    }
+    try {
+      const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
+      const operator = String(currentUser?.nickname || currentUser?.username || '-').trim() || '-';
+      const recordRepo = ctx.db.getRepository('kkfileviewModificationRecordItems');
+      if (recordRepo) {
+        await recordRepo.create({
+          values: {
+            operator,
+            summary: '自动切换：本地静态文件缺失，File Viewer 加载模式由静态(proxy)切换为 CDN',
+            changedFields: JSON.stringify(['fileViewerLoadMode']),
+            content: 'proxy -> cdn',
+          },
+        });
+      }
+    } catch {
+      // 记录日志失败不影响切换结果。
+    }
   }
 
   private registerFileViewerProxyResource() {

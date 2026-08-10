@@ -48,6 +48,8 @@ export type KkfileviewConfigRecord = Partial<{
     enableDownload: boolean;
     fileViewerLoadMode: 'cdn' | 'proxy';
     basemetasRequestType: BasemetasRequestType | string;
+    basemetasFileAccess: 'proxy' | 'direct' | string;
+    kkfileviewFileAccess: 'direct' | 'proxy' | string;
     watermarkType: string;
     watermark: string;
     watermarkOpacity: number;
@@ -117,6 +119,8 @@ interface KkfileviewConfig {
     enableDownload: boolean;
     fileViewerLoadMode: 'cdn' | 'proxy';
     basemetasRequestType: BasemetasRequestType;
+    basemetasFileAccess: 'proxy' | 'direct';
+    kkfileviewFileAccess: 'direct' | 'proxy';
     watermarkType: string;
     watermark: string;
     watermarkOpacity: number;
@@ -147,18 +151,20 @@ export const kkfileviewConfig: KkfileviewConfig = {
     enableFullscreenButton: true,
     enableMobileAutoFullscreen: false,
     enableDownload: true,
-    fileViewerLoadMode: 'proxy',
+    fileViewerLoadMode: 'cdn',
     basemetasRequestType: 'query',
+    basemetasFileAccess: 'direct',
+    kkfileviewFileAccess: 'direct',
     watermarkType: 'preview',
     watermark: '',
     watermarkOpacity: 0.18,
     watermarkRotate: -24,
     watermarkColor: 'rgba(0, 0, 0, 0.18)',
-    enableKkfileview: true,
+    enableKkfileview: false,
     enableBasemetas: false,
-    enableMicrosoft: true,
-    enableFileViewer: false, // 设置 File Viewer 默认关闭。
-    preferredPreview: 'microsoft',
+    enableMicrosoft: false,
+    enableFileViewer: true, // 设置 File Viewer 默认开启。
+    preferredPreview: 'fileViewer',
     enableCopyEmbedHtml: true,
     copyEmbedHtmlPermission: 'user',
     copyEmbedHtmlRoles: [],
@@ -229,17 +235,19 @@ export function updateConfigCache(record?: KkfileviewConfigRecord | null) {
     kkfileviewConfig.enableFullscreenButton = record.enableFullscreenButton ?? true;
     kkfileviewConfig.enableMobileAutoFullscreen = record.enableMobileAutoFullscreen === true;
     kkfileviewConfig.enableDownload = record.enableDownload ?? true;
-    kkfileviewConfig.fileViewerLoadMode = record.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy';
+    kkfileviewConfig.fileViewerLoadMode = record.fileViewerLoadMode === 'proxy' ? 'proxy' : 'cdn';
     kkfileviewConfig.basemetasRequestType = record.basemetasRequestType === 'base64' ? 'base64' : 'query';
+    kkfileviewConfig.basemetasFileAccess = record.basemetasFileAccess === 'proxy' ? 'proxy' : 'direct';
+    kkfileviewConfig.kkfileviewFileAccess = record.kkfileviewFileAccess === 'proxy' ? 'proxy' : 'direct';
     kkfileviewConfig.watermarkType = record.watermarkType || 'preview';
     kkfileviewConfig.watermark = record.watermark || '';
     kkfileviewConfig.watermarkOpacity = typeof record.watermarkOpacity === 'number' ? record.watermarkOpacity : 0.18;
     kkfileviewConfig.watermarkRotate = typeof record.watermarkRotate === 'number' ? record.watermarkRotate : -24;
     kkfileviewConfig.watermarkColor = record.watermarkColor || 'rgba(0, 0, 0, 0.18)';
-    kkfileviewConfig.enableKkfileview = record.enableKkfileview ?? true;
+    kkfileviewConfig.enableKkfileview = record.enableKkfileview ?? false;
     kkfileviewConfig.enableBasemetas = record.enableBasemetas ?? false;
-    kkfileviewConfig.enableMicrosoft = record.enableMicrosoft ?? true;
-    kkfileviewConfig.enableFileViewer = record.enableFileViewer === true; // 同步更新 File Viewer 是否启用。
+    kkfileviewConfig.enableMicrosoft = record.enableMicrosoft ?? false;
+    kkfileviewConfig.enableFileViewer = record.enableFileViewer !== false; // 同步更新 File Viewer 是否启用。
     kkfileviewConfig.enableCopyEmbedHtml = record.enableCopyEmbedHtml ?? true;
     kkfileviewConfig.copyEmbedHtmlPermission = isEmbedCodePermission(record.copyEmbedHtmlPermission)
         ? record.copyEmbedHtmlPermission

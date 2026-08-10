@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Button, Space, Typography, Radio, message, Input, Form, Select, Switch, Spin, Progress, Tooltip } from 'antd';
 import { CloseOutlined, LeftOutlined, RightOutlined, FullscreenOutlined, FullscreenExitOutlined, ExportOutlined, CodeOutlined, DownloadOutlined } from '@ant-design/icons';
-import { saveAs } from 'file-saver';
 import { Base64 } from 'js-base64';
 import { ClientAdapters } from './adapter';
 import { FileViewerRenderer, FileViewerFetchFileFn } from '../FileViewerRenderer';
-import { resolveFileViewerAssetBase } from '../fileViewerRuntime';
+import { buildFileViewerScriptUrls, resolveFileViewerAssetBase } from '../fileViewerRuntime';
 import { attachTokenToNocoFileUrl, buildStorageBaseUrl, decidePreviewMode, getFileExt, isNocoBaseForcedDownloadUrl, parseExtensions } from '../previewUtils';
 import {
   EmbedCodePermission,
@@ -501,7 +500,21 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         }
         if (service.key === 'kkfileview') {
           const baseUrl = `${serviceConfigMap.kkfileview.host.replace(/\/$/, '')}/onlinePreview`;
-          let targetUrl = activeTargetFileUrl;
+          // 直连模式（默认）：直接使用文件真实地址（外部存储直链或 NocoBase 文件路径），
+          // 适用于 kkFileView 能访问文件所在服务器的场景。
+          // 代理模式：经 NocoBase 代理拉取，适用于对象存储仅内网可访问、
+          // 而 kkFileView 可访问 NocoBase 的场景。
+          const useDirectFileAccess = kkfileviewConfig.kkfileviewFileAccess !== 'proxy';
+          let targetUrl = '';
+          if (useDirectFileAccess) {
+            targetUrl = activeTargetFileUrl;
+          } else {
+            const proxyTarget =
+              previewToken && fileViewerSourceUrl
+                ? buildFileViewerProxyUrl(fileViewerSourceUrl, previewToken, kkfileviewConfig.nocobaseHost)
+                : '';
+            targetUrl = proxyTarget || activeTargetFileUrl;
+          }
           try {
             if (decodeURIComponent(targetUrl) !== targetUrl) {
               targetUrl = decodeURI(targetUrl);
@@ -519,7 +532,22 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         }
         if (service.key === 'basemetas') {
           const baseUrl = `${serviceConfigMap.basemetas.host.replace(/\/$/, '')}/preview/view`;
-          let targetUrl = activeTargetFileUrl;
+          // BaseMetas 为云端服务，默认无法访问内网对象存储（MinIO/S3），
+          // 统一改走 NocoBase 代理地址：由服务端拉取源文件并流式返回，云端只需访问公网 NocoBase。
+          // 代理地址优先使用系统公共访问地址（nocobaseHost），未配置时回退到当前浏览器来源。
+          // 当文件服务器本身可被预览服务直接访问时（basemetasFileAccess=direct），
+          // 直接使用文件地址，避免云端访问不到 NocoBase 代理导致无法下载预览文件。
+          const useDirectFileAccess = kkfileviewConfig.basemetasFileAccess === 'direct';
+          let targetUrl = '';
+          if (useDirectFileAccess) {
+            targetUrl = activeTargetFileUrl;
+          } else {
+            const proxyTarget =
+              previewToken && fileViewerSourceUrl
+                ? buildFileViewerProxyUrl(fileViewerSourceUrl, previewToken, kkfileviewConfig.nocobaseHost)
+                : '';
+            targetUrl = proxyTarget || activeTargetFileUrl;
+          }
           try {
             if (decodeURIComponent(targetUrl) !== targetUrl) {
               targetUrl = decodeURI(targetUrl);
@@ -589,7 +617,7 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
         }
         return acc;
       }, {} as Record<PreviewService, string>),
-    [fileMeta.fullUrl, fileMeta.ext, activeTargetFileUrl, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType, previewToken]
+    [fileMeta.fullUrl, fileMeta.ext, activeTargetFileUrl, serviceConfigMap, watermarkText, file?.name, file?.title, fileDisplayTitle, kkfileviewConfig.basemetasRequestType, kkfileviewConfig.watermarkType, previewToken, fileViewerSourceUrl, kkfileviewConfig.basemetasFileAccess, kkfileviewConfig.kkfileviewFileAccess, kkfileviewConfig.nocobaseHost]
   );
 
   const resolvedPreviewUrl = useMemo(() => {
@@ -837,11 +865,11 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
           serviceConfigMap.fileViewer.host,
           kkfileviewConfig.fileViewerDownloaded
         );
-        const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
+        const scriptUrls = buildFileViewerScriptUrls(resolvedAssetBase);
+        const safeScriptUrls = safeScriptJson(scriptUrls);
         const safeTitle = escapeHtml(viewerFileName);
         const safeFileUrl = safeScriptJson(fileViewerProxyUrl || fileMeta.fullUrl);
         const safeFileName = safeScriptJson(viewerFileName);
-        const safeAssetBase = safeScriptJson(resolvedAssetBase);
         const safeWatermarkConfig = watermarkText
           ? safeScriptJson({
               text: watermarkText,
@@ -905,7 +933,6 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       <p style="margin-top: 16px; color: #666; font-size: 14px;">正在加载 File Viewer 预览组件...</p>
     </div>
   </div>
-  <script src="${scriptUrl}"></script>
   <script>
     // 将掩膜打印所需的 .fv-print-mask-* CSS 注入到 ShadowRoot（与主窗口逻辑保持一致）
     // 库自身将此 CSS 写入 document.head，但 ShadowRoot 内元素无法继承，需手动补注入。
@@ -941,22 +968,45 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
     }
 
     (function() {
-      var attempts = 0;
+      // 按优先级顺序加载入口脚本：本地资源失败时自动回退公共 CDN。
+      var scriptUrls = ${safeScriptUrls};
+      var scriptIndex = 0;
+      var loadedBase = null;
+
+      function loadNextScript() {
+        if (scriptIndex >= scriptUrls.length) {
+          var loadingMask = document.getElementById('loading-mask');
+          if (loadingMask) {
+            loadingMask.innerHTML = '<p style="color: #ff4d4f; font-size: 14px;">预览组件加载失败，请检查网络后重试</p>';
+          }
+          return;
+        }
+        var s = document.createElement('script');
+        s.src = scriptUrls[scriptIndex];
+        s.onload = function() {
+          loadedBase = scriptUrls[scriptIndex].replace(/[^/]+\/?$/, '');
+          scriptIndex++;
+          startViewer();
+        };
+        s.onerror = function() {
+          scriptIndex++;
+          loadNextScript();
+        };
+        document.body.appendChild(s);
+      }
+
       function startViewer() {
         var globalLib = window.FlyfishFileViewerWebFull;
         var host = document.getElementById('viewer-host');
         var loadingMask = document.getElementById('loading-mask');
         if (!globalLib || !globalLib.mountViewer || !host) {
-          attempts++;
-          if (attempts < 100) {
-            setTimeout(startViewer, 100);
-          } else if (loadingMask) {
-            loadingMask.innerHTML = '<p style="color: #ff4d4f; font-size: 14px;">预览组件加载超时，请刷新重试</p>';
+          if (loadingMask) {
+            loadingMask.innerHTML = '<p style="color: #ff4d4f; font-size: 14px;">预览组件加载失败，请检查网络后重试</p>';
           }
           return;
         }
-        if (globalLib.setDefaultFullAssetBaseUrl) {
-          globalLib.setDefaultFullAssetBaseUrl(${safeAssetBase});
+        if (globalLib.setDefaultFullAssetBaseUrl && loadedBase) {
+          globalLib.setDefaultFullAssetBaseUrl(loadedBase);
         }
         var watermarkConfig = ${safeWatermarkConfig};
         var options = { styleIsolation: 'shadow', toolbar: true };
@@ -986,9 +1036,9 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       }
 
       if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        startViewer();
+        loadNextScript();
       } else {
-        window.addEventListener('DOMContentLoaded', startViewer);
+        window.addEventListener('DOMContentLoaded', loadNextScript);
       }
     })();
   </script>
@@ -1158,8 +1208,15 @@ export const BaseKKFilePreviewer = (props: BasePreviewerProps) => {
       return;
     }
     // NocoBase 托管的文件需要鉴权，附加短期预览令牌后再下载。
+    // 不使用 file-saver（其 saveAs 在某些构建下为 undefined），改为原生 anchor 触发下载。
     const downloadUrl = attachTokenToNocoFileUrl(fileMeta.fullUrl, previewToken) || fileMeta.fullUrl;
-    saveAs(downloadUrl, fileDisplayTitle);
+    const anchor = document.createElement('a');
+    anchor.href = downloadUrl;
+    anchor.download = fileDisplayTitle;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   }, [kkfileviewConfig.enableDownload, fileMeta.fullUrl, fileDisplayTitle, previewToken, t]);
 
   const modalWidth = useMemo(() => (useMobileFullscreenLayout ? '100vw' : '82vw'), [useMobileFullscreenLayout]);

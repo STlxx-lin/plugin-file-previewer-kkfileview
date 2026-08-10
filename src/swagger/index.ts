@@ -525,6 +525,14 @@ export default {
             type: 'string',
             description: 'BaseMetas 请求类型（query | base64）',
           },
+          basemetasFileAccess: {
+            type: 'string',
+            description: 'BaseMetas 文件获取方式（direct 默认，直接使用文件服务器地址 | proxy 经 NocoBase 代理拉取）',
+          },
+          kkfileviewFileAccess: {
+            type: 'string',
+            description: 'kkFileView 文件获取方式（direct 默认，直接使用文件真实地址 | proxy 经 NocoBase 代理拉取）',
+          },
           enableCopyEmbedHtml: {
             type: 'boolean',
             description: '是否显示复制嵌入代码按钮',

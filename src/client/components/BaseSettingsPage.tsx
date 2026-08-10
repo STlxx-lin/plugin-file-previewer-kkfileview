@@ -57,6 +57,8 @@ type KkfileviewSettingsRecord = {
     enableMobileAutoFullscreen?: boolean;
     enableDownload?: boolean;
     basemetasRequestType?: 'query' | 'base64';
+    basemetasFileAccess?: 'proxy' | 'direct' | string;
+    kkfileviewFileAccess?: 'direct' | 'proxy' | string;
     enableCopyEmbedHtml?: boolean;
     copyEmbedHtmlPermission?: 'admin' | 'user' | 'roles' | string;
     copyEmbedHtmlRoles?: string | string[];
@@ -89,6 +91,8 @@ type SettingsFormValues = {
     enableMobileAutoFullscreen: boolean;
     enableDownload: boolean;
     basemetasRequestType: 'query' | 'base64';
+    basemetasFileAccess: 'proxy' | 'direct';
+    kkfileviewFileAccess: 'direct' | 'proxy';
     enableCopyEmbedHtml: boolean;
     copyEmbedHtmlPermission: 'admin' | 'user' | 'roles' | string;
     copyEmbedHtmlRoles: string[] | string;
@@ -271,6 +275,8 @@ const FIELD_LABEL_MAP: Record<string, string> = {
     fileViewerExtensions: 'File Viewer 文件格式',
     preferredPreview: '优先预览',
     basemetasRequestType: 'BaseMetas 请求类型',
+    basemetasFileAccess: 'BaseMetas 文件获取方式',
+    kkfileviewFileAccess: 'kkFileView 文件获取方式',
     enableOpenInNewWindow: '新窗口按钮',
     enableFullscreenButton: '全屏按钮',
     enableMobileAutoFullscreen: '移动端自动全屏',
@@ -514,7 +520,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
         const baseExt = parseExtensions(record.basemetasExtensions, DEFAULT_EXTENSIONS);
         const msExt = parseExtensions(record.microsoftExtensions, DEFAULT_MICROSOFT_EXTENSIONS);
         const fileViewerState = buildFileViewerFormState(record, {
-            enableFileViewer: false,
+            enableFileViewer: true,
             fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
             fileViewerExtensions: DEFAULT_FILE_VIEWER_EXTENSIONS,
         });
@@ -527,10 +533,10 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             && JSON.stringify(baseExt) === JSON.stringify(DEFAULT_EXTENSIONS)
             && JSON.stringify(msExt) === JSON.stringify(DEFAULT_MICROSOFT_EXTENSIONS)
             && JSON.stringify(fileViewerState.fileViewerExtensions) === JSON.stringify(DEFAULT_FILE_VIEWER_EXTENSIONS)
-            && (record.enableKkfileview ?? true) === true
+            && (record.enableKkfileview ?? false) === false
             && (record.enableBasemetas ?? false) === false
-            && (record.enableMicrosoft ?? true) === true
-            && fileViewerState.enableFileViewer === false
+            && (record.enableMicrosoft ?? false) === false
+            && fileViewerState.enableFileViewer === true
             && (record.enableOpenInNewWindow ?? true) === true
             && (record.enableFullscreenButton ?? true) === true
             && (record.enableMobileAutoFullscreen ?? false) === false
@@ -541,7 +547,8 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             && (String(record.copyEmbedHtmlRoles || '').trim() === '' || String(record.copyEmbedHtmlRoles || '').trim() === '[]')
             && (record.watermark || '') === ''
             && ((record.watermarkType || 'preview') === 'preview')
-            && ((record.preferredPreview || 'microsoft') === 'microsoft');
+            && ((record.fileViewerLoadMode || 'cdn') === 'cdn')
+            && ((record.preferredPreview || 'fileViewer') === 'fileViewer');
     };
 
     useEffect(() => {
@@ -553,11 +560,11 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
 
     useEffect(() => {
         if (!currentRecord) return;
-        const enableKk = currentRecord.enableKkfileview ?? true;
+        const enableKk = currentRecord.enableKkfileview ?? false;
         const enableBase = currentRecord.enableBasemetas ?? false;
-        const enableMs = currentRecord.enableMicrosoft ?? true;
+        const enableMs = currentRecord.enableMicrosoft ?? false;
         const fileViewerState = buildFileViewerFormState(currentRecord, {
-            enableFileViewer: false,
+            enableFileViewer: true,
             fileViewerAssetBase: DEFAULT_FILE_VIEWER_ASSET_BASE,
             fileViewerExtensions: DEFAULT_FILE_VIEWER_EXTENSIONS,
         });
@@ -599,12 +606,14 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
             enableMobileAutoFullscreen: currentRecord.enableMobileAutoFullscreen === true,
             enableDownload: currentRecord.enableDownload !== false,
             basemetasRequestType: currentRecord.basemetasRequestType === 'base64' ? 'base64' : 'query',
+            basemetasFileAccess: currentRecord.basemetasFileAccess === 'proxy' ? 'proxy' : 'direct',
+            kkfileviewFileAccess: currentRecord.kkfileviewFileAccess === 'proxy' ? 'proxy' : 'direct',
             enableCopyEmbedHtml: currentRecord.enableCopyEmbedHtml !== false,
             copyEmbedHtmlPermission: ['admin', 'user', 'roles'].includes(currentRecord.copyEmbedHtmlPermission || '') ? currentRecord.copyEmbedHtmlPermission : 'user',
             copyEmbedHtmlRoles: normalizeRoleNames(currentRecord.copyEmbedHtmlRoles),
             watermarkType: currentRecord.watermarkType || 'preview',
             watermark: currentRecord.watermark || '',
-            fileViewerLoadMode: currentRecord.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy',
+            fileViewerLoadMode: currentRecord.fileViewerLoadMode === 'proxy' ? 'proxy' : 'cdn',
         });
         setWatermarkTypeDraft(currentRecord.watermarkType === 'global' ? 'global' : 'preview');
         setWatermarkDraft(String(currentRecord.watermark || ''));
@@ -970,33 +979,35 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
         const resetValues = {
             ...defaultFields,
             nocobaseHost: '',
-            enableKkfileview: true,
+            enableKkfileview: false,
             enableBasemetas: false,
-            enableMicrosoft: true,
-            enableFileViewer: false,
-            preferredPreview: 'microsoft' as PreviewEngine,
+            enableMicrosoft: false,
+            enableFileViewer: true,
+            preferredPreview: 'fileViewer' as PreviewEngine,
             enableOpenInNewWindow: true,
             enableFullscreenButton: true,
             enableMobileAutoFullscreen: false,
             enableDownload: true,
             basemetasRequestType: 'query' as const,
+            basemetasFileAccess: 'direct' as const,
+            kkfileviewFileAccess: 'direct' as const,
             enableCopyEmbedHtml: true,
             copyEmbedHtmlPermission: 'user' as const,
             copyEmbedHtmlRoles: [],
             watermarkType: 'preview',
             watermark: '',
-            fileViewerLoadMode: 'proxy' as const,
+            fileViewerLoadMode: 'cdn' as const,
         };
 
         form.setFieldsValue(resetValues);
         setWatermarkTypeDraft('preview');
         setWatermarkDraft('');
         setServiceState({
-            enableKkfileview: true,
+            enableKkfileview: false,
             enableBasemetas: false,
-            enableMicrosoft: true,
-            enableFileViewer: false,
-            preferredPreview: 'microsoft',
+            enableMicrosoft: false,
+            enableFileViewer: true,
+            preferredPreview: 'fileViewer',
         });
         message.info(tr('Reset to default values, please click save to submit', '已恢复默认值，请点击保存提交生效'));
     };
@@ -1072,6 +1083,8 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 enableMobileAutoFullscreen: values.enableMobileAutoFullscreen === true,
                 enableDownload: values.enableDownload === true,
                 basemetasRequestType: values.basemetasRequestType === 'base64' ? 'base64' : 'query',
+                basemetasFileAccess: values.basemetasFileAccess === 'proxy' ? 'proxy' : 'direct',
+                kkfileviewFileAccess: values.kkfileviewFileAccess === 'proxy' ? 'proxy' : 'direct',
                 enableCopyEmbedHtml: values.enableCopyEmbedHtml === true,
                 copyEmbedHtmlPermission: values.copyEmbedHtmlPermission || 'user',
                 copyEmbedHtmlRoles: normalizeRoleNames(values.copyEmbedHtmlRoles),
@@ -1080,7 +1093,7 @@ export const BaseSettingsPage: React.FC<BaseSettingsPageProps> = ({ adapters }) 
                 watermarkOpacity: watermarkSaveState.watermarkOpacity,
                 watermarkRotate: watermarkSaveState.watermarkRotate,
                 watermarkColor: watermarkSaveState.watermarkColor,
-                fileViewerLoadMode: values.fileViewerLoadMode === 'cdn' ? 'cdn' : 'proxy',
+                fileViewerLoadMode: values.fileViewerLoadMode === 'proxy' ? 'proxy' : 'cdn',
             };
 
             const changedFields = getChangedFieldNames(payload, currentRecord);

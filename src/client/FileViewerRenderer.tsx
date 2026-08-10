@@ -3,7 +3,12 @@
  * File Viewer 渲染器在 legacy `/admin` 中也会被加载，因此统一使用 classic JSX runtime。
  */
 import React, { useEffect, useRef } from 'react'; // 引入 React 及其副作用和引用能力。
-import { resolveFileViewerAssetBase } from './fileViewerRuntime'; // 引入 File Viewer 资源基址解析工具。
+import {
+  FILE_VIEWER_SCRIPT_NAME,
+  buildFileViewerScriptUrls,
+  markFileViewerLocalAssetUnavailable,
+  resolveFileViewerAssetBase,
+} from './fileViewerRuntime'; // 引入 File Viewer 资源基址解析工具。
 
 /** 与 @file-viewer/web ViewerFetchInput 结构对齐的最小入参类型，避免静态引入 SDK 包。 */
 export type FileViewerFetchInput = {
@@ -187,14 +192,32 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
       try { // 捕获动态加载或挂载过程中的运行异常。
         const resolvedAssetBase = resolveFileViewerAssetBase(assetBase, fileViewerDownloaded); // 解析最终生效 of 资源基址。
 
-        // 动态加载 UMD/IIFE 打包好的静态 JS 资源，而不是由打包器静态编译，以绕过打包器编译错误
-        const scriptUrl = `${resolvedAssetBase}flyfish-file-viewer-web-full.iife.js`;
-
-        await loadScriptWithProgress(scriptUrl, (percent) => {
-          if (!disposed) {
-            onProgressRef.current?.(percent);
+        // 动态加载 UMD/IIFE 打包好的静态 JS 资源，而不是由打包器静态编译，以绕过打包器编译错误。
+        // 本地静态资源（/api/kkfileviewPublicAssets/）不可用时自动回退到公共 CDN。
+        const scriptUrls = buildFileViewerScriptUrls(resolvedAssetBase);
+        let loadedScriptUrl = '';
+        let lastLoadError: unknown = null;
+        for (const scriptUrl of scriptUrls) {
+          try {
+            await loadScriptWithProgress(scriptUrl, (percent) => {
+              if (!disposed) {
+                onProgressRef.current?.(percent);
+              }
+            });
+            loadedScriptUrl = scriptUrl;
+            break;
+          } catch (err) {
+            lastLoadError = err;
           }
-        });
+        }
+        if (!loadedScriptUrl) {
+          // 本地优先地址全部失败：若包含本地路径则标记为不可用，后续预览直接走 CDN。
+          if (scriptUrls.length > 1) {
+            markFileViewerLocalAssetUnavailable();
+          }
+          throw lastLoadError || new Error('fileViewer script load failed');
+        }
+        const finalAssetBase = loadedScriptUrl.slice(0, -FILE_VIEWER_SCRIPT_NAME.length);
 
         if (disposed) return;
 
@@ -210,7 +233,7 @@ export function FileViewerRenderer(props: FileViewerRendererProps) { // 导出 F
           throw new Error('fileViewer mountViewer is unavailable'); // 抛出挂载函数缺失错误。
         } // 结束挂载函数存在性校验分支。
 
-        setAssetBase?.(resolvedAssetBase); // 当模块支持时先设置全局资源基址，确保离线资产走自部署路径。
+        setAssetBase?.(finalAssetBase); // 当模块支持时先设置全局资源基址，确保资产（本地或 CDN）与入口脚本同源。
 
         /**
          * coreOptions.fetchFile 是 @file-viewer/web 提供的扩展点，允许调用方

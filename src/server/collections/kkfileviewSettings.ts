@@ -72,7 +72,7 @@ export default defineCollection({
         {
             type: 'boolean',
             name: 'enableKkfileview',
-            defaultValue: true,
+            defaultValue: false,
         },
         {
             type: 'boolean',
@@ -82,7 +82,7 @@ export default defineCollection({
         {
             type: 'boolean',
             name: 'enableMicrosoft',
-            defaultValue: true,
+            defaultValue: false,
         },
         {
             type: 'string',
@@ -97,7 +97,7 @@ export default defineCollection({
         {
             type: 'boolean',
             name: 'enableFileViewer', // File Viewer 启用状态字段
-            defaultValue: false,
+            defaultValue: true,
         },
         {
             type: 'boolean',
@@ -123,6 +123,16 @@ export default defineCollection({
             type: 'string',
             name: 'basemetasRequestType',
             defaultValue: 'query',
+        },
+        {
+            type: 'string',
+            name: 'basemetasFileAccess', // BaseMetas 文件获取方式：direct | proxy
+            defaultValue: 'direct',
+        },
+        {
+            type: 'string',
+            name: 'kkfileviewFileAccess', // kkFileView 文件获取方式：direct | proxy
+            defaultValue: 'direct',
         },
         {
             type: 'boolean',
@@ -176,8 +186,8 @@ export default defineCollection({
         },
         {
             type: 'string',
-            name: 'fileViewerLoadMode', // File Viewer 默认加载模式: 'proxy' | 'cdn'
-            defaultValue: 'proxy',
+            name: 'fileViewerLoadMode', // File Viewer 默认加载模式: 'cdn' | 'proxy'
+            defaultValue: 'cdn',
         },
     ],
 });

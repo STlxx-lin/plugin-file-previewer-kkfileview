@@ -37,7 +37,13 @@ export const DEFAULT_FILE_VIEWER_EXTENSIONS = [
 ]; // 结束 File Viewer 默认扩展名列表定义。
 
 /** 默认优先的预览引擎 */
-export const DEFAULT_PREFERRED_PREVIEW = 'microsoft';
+export const DEFAULT_PREFERRED_PREVIEW = 'fileViewer';
+
+/** BaseMetas 默认文件获取方式：direct 表示直接使用文件服务器地址，proxy 表示经 NocoBase 代理拉取 */
+export const DEFAULT_BASEMETAS_FILE_ACCESS = 'direct';
+
+/** kkFileView 默认文件获取方式：direct 表示直接使用文件真实地址，proxy 表示经 NocoBase 代理拉取 */
+export const DEFAULT_KKFILEVIEW_FILE_ACCESS = 'direct';
 
 /** File Viewer 代理接口路径关键字，client 与 server 统一用于识别代理地址 */
 export const FILE_VIEWER_PROXY_PATH_KEYWORD = 'kkfileviewFileViewerProxy';

@@ -93,8 +93,11 @@ export function isFileViewerProxyUrl(url: unknown): boolean {
 /**
  * 构建 File Viewer 代理地址。
  * 前端只请求该安全代理路径，由服务端代为拉取源文件，避免直接暴露源文件地址。
+ * 代理地址默认基于当前浏览器来源生成；
+ * 传入 baseHost（如系统公共访问地址 nocobaseHost）时，改用该公网地址，
+ * 确保第三方预览服务（如 BaseMetas）可以从公网访问到该代理。
  */
-export function buildFileViewerProxyUrl(fileUrl: string, token?: string | null): string {
+export function buildFileViewerProxyUrl(fileUrl: string, token?: string | null, baseHost: string = ''): string {
   const rawUrl = String(fileUrl || '').trim();
   if (!rawUrl) return '';
   const apiBase = getApiBaseUrl();
@@ -104,6 +107,18 @@ export function buildFileViewerProxyUrl(fileUrl: string, token?: string | null):
     params.set('token', token);
   }
   const relativeUrl = `${apiBase}/${FILE_VIEWER_PROXY_PATH_KEYWORD}:get?${params.toString()}`;
+  const normalizedBase = String(baseHost || '').trim().replace(/\/+$/, '');
+  if (normalizedBase && /^https?:\/\//i.test(normalizedBase)) {
+    try {
+      // apiBase 为绝对地址时直接返回；相对路径则拼接在公网基础地址之后，
+      // 保留基础地址的子路径（如 https://host/nocobase/api/...）。
+      if (/^https?:\/\//i.test(relativeUrl)) return relativeUrl;
+      const combined = `${normalizedBase}${relativeUrl.startsWith('/') ? '' : '/'}${relativeUrl}`;
+      return new URL(combined).toString();
+    } catch {
+      // 回退到浏览器来源。
+    }
+  }
   if (typeof window === 'undefined' || !window.location) {
     return relativeUrl;
   }

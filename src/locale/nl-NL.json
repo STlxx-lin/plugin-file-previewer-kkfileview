@@ -33,6 +33,12 @@
   "Select how BaseMetas preview URL is generated": "Selecteer hoe BaseMetas voorbeeld-URL wordt gegenereerd",
   "Query Parameters": "Query-parameters",
   "Base64 Encoded": "Base64-gecodeerd",
+  "BaseMetas File Access Mode": "BaseMetas bestandstoegangsmethode",
+  "Proxy Mode: file is streamed through the NocoBase proxy (suitable when the object storage is internal-only). Direct Mode: the preview service downloads the file directly from the file server (suitable when the file server is reachable by the preview service).": "Proxymodus: het bestand wordt via de NocoBase-proxy gestreamd (geschikt wanneer de objectopslag alleen intern toegankelijk is). Directe modus: de previewservice downloadt het bestand rechtstreeks van de bestandsserver (geschikt wanneer de bestandsserver bereikbaar is voor de previewservice).",
+  "kkFileView File Access Mode": "kkFileView bestandstoegangsmethode",
+  "Direct Mode (default, file server accessible)": "Directe modus (standaard, bestandsserver toegankelijk)",
+  "Proxy Mode (via NocoBase)": "Proxymodus (via NocoBase)",
+  "Direct Mode: kkFileView downloads the file directly from its real location (suitable when the file server is reachable by kkFileView). Proxy Mode: file is streamed through the NocoBase proxy (suitable when the object storage is internal-only).": "Directe modus: kkFileView downloadt het bestand rechtstreeks van de werkelijke locatie (geschikt wanneer de bestandsserver bereikbaar is voor kkFileView). Proxymodus: het bestand wordt via de NocoBase-proxy gestreamd (geschikt wanneer de objectopslag alleen intern toegankelijk is).",
   "Please enter the server address": "Voer het serveradres in",
   "Please fill in service address first": "Vul eerst het service-adres in",
   "Service connectivity normal": "Serviceverbinding normaal",
@@ -216,7 +222,8 @@
   "Failed to download File Viewer static files": "Fout bij downloaden van statische File Viewer-bestanden",
   "Loading preview component...": "Preview-component laden...",
   "File Viewer Default Load Mode": "Standaard laadmodus File Viewer",
-  "CDN Mode: File Viewer fetches the file directly via the public URL (suitable for public CDN links). Proxy Mode: requests are proxied through NocoBase with authentication token (suitable for internal storage).": "CDN-modus: File Viewer laadt het bestand rechtstreeks via de openbare URL. Proxy-modus: verzoeken worden via NocoBase doorgegeven met authenticatietoken.",
-  "Proxy Mode (default, authenticated)": "Proxy-modus (standaard, geverifieerd)",
+  "CDN Mode (default, direct link)": "CDN-modus (standaard, directe link)",
+  "Static Mode (local static files)": "Statische modus (lokale statische bestanden)",
+  "CDN Mode (default): File Viewer loads its runtime from the public CDN. Static Mode: local static files are served first, and the mode automatically switches to CDN when no local static files exist.": "CDN-modus (standaard): File Viewer laadt zijn runtime van de publieke CDN. Statische modus: lokale statische bestanden worden eerst gebruikt en de modus schakelt automatisch naar CDN wanneer er geen lokale statische bestanden zijn.",
   "CDN Mode (direct link)": "CDN-modus (directe link)"
 }
