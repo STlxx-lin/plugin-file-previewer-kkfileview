@@ -195,14 +195,14 @@ export default {
     '/kkfileviewPreview:resolveDirectUrl': {
       get: {
         tags: ['kkfileviewPreview'],
-        summary: '解析文件直链（NocoBase 托管地址附加短期预览令牌）',
+        summary: '解析文件直链（NocoBase 托管地址附加短期预览令牌；外部存储直链直接返回）',
         parameters: [
           {
             name: 'url',
             in: 'query',
             required: true,
             schema: { type: 'string' },
-            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）',
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）或与文件记录匹配的外部存储直链（如 MinIO/S3）',
           },
         ],
         responses: {
@@ -241,7 +241,7 @@ export default {
             in: 'query',
             required: true,
             schema: { type: 'string' },
-            description: 'NocoBase 永久文件地址（/files/ 或 /storage/），拒绝任意外部地址',
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）或与文件记录匹配的外部存储直链（如 MinIO/S3），拒绝任意外部地址',
           },
         ],
         responses: {
@@ -283,14 +283,14 @@ export default {
     '/kkfileviewFileViewerProxy:get': {
       get: {
         tags: ['kkfileviewFileViewerProxy'],
-        summary: 'File Viewer 文件代理（仅接受短期预览令牌，且仅限 NocoBase 托管文件）',
+        summary: 'File Viewer 文件代理（仅接受短期预览令牌，且仅限 NocoBase 托管文件或匹配文件记录的存储直链）',
         parameters: [
           {
             name: 'url',
             in: 'query',
             required: true,
             schema: { type: 'string' },
-            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）',
+            description: 'NocoBase 永久文件地址（/files/ 或 /storage/）或与文件记录匹配的外部存储直链（如 MinIO/S3）',
           },
           {
             name: 'token',

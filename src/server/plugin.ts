@@ -1022,12 +1022,114 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
   }
 
   /**
+   * 将请求中的文件地址解析为允许拉取的目标地址，兼容两类来源：
+   * 1. NocoBase 托管地址（/files/ 永久地址、/storage/ 本地地址）——按原逻辑直接放行；
+   * 2. 外部存储直链（如 MinIO/S3）——仅当能在文件记录表中匹配到对应文件时放行，
+   *    防止代理被用作任意 URL 的 SSRF 通道。
+   *    兼容 NocoBase 2.1：附件记录返回的 url 即为存储直链（无 /files/ 永久地址），
+   *    客户端会携带该地址请求令牌/代理，若一律拒绝将导致 MinIO 等外部存储的附件无法预览。
+   */
+  private async resolveAllowedFileFetchTarget(ctx: ActionContext, fileUrl: string): Promise<{ allowed: boolean; targetUrl: string }> {
+    if (isNocoBaseManagedFileUrl(fileUrl)) {
+      return { allowed: true, targetUrl: fileUrl };
+    }
+    const found = await this.findFileRecordByStorageUrl(ctx, fileUrl);
+    if (!found) return { allowed: false, targetUrl: '' };
+    return { allowed: true, targetUrl: fileUrl };
+  }
+
+  /** 外部存储直链放行结果的短期缓存，避免代理高频请求反复扫描文件表。 */
+  private fileUrlAllowCache = new Map<string, { allowed: boolean; expiresAt: number }>();
+
+  private readonly FILE_URL_ALLOW_CACHE_TTL_MS = 60 * 1000;
+
+  private getCachedFileUrlAllowance(fileUrl: string): boolean | undefined {
+    const entry = this.fileUrlAllowCache.get(fileUrl);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) {
+      this.fileUrlAllowCache.delete(fileUrl);
+      return undefined;
+    }
+    return entry.allowed;
+  }
+
+  private cacheFileUrlAllowance(fileUrl: string, allowed: boolean): void {
+    if (this.fileUrlAllowCache.size > 2000) {
+      const now = Date.now();
+      for (const [key, entry] of this.fileUrlAllowCache) {
+        if (entry.expiresAt <= now) this.fileUrlAllowCache.delete(key);
+      }
+    }
+    this.fileUrlAllowCache.set(fileUrl, { allowed, expiresAt: Date.now() + this.FILE_URL_ALLOW_CACHE_TTL_MS });
+  }
+
+  /**
+   * 在文件记录中查找与外部存储直链匹配的记录。
+   * 匹配策略：
+   * 1. 记录 url 字段与请求地址（解码后）完全一致；
+   * 2. 按文件名匹配候选记录后，用 file-manager 的 getFileURL 生成规范地址并与请求地址比较，
+   *    确保地址确实属于该文件记录对应的存储，而非任意外部地址。
+   */
+  private async findFileRecordByStorageUrl(ctx: ActionContext, fileUrl: string): Promise<unknown | null> {
+    try {
+      const parsed = new URL(fileUrl);
+      const decodedPath = decodeURIComponent(parsed.pathname);
+      const decodedUrl = `${parsed.origin}${decodedPath}`;
+      const fileName = String(decodedPath.split('/').pop() || '').trim();
+      if (!fileName) return null;
+      const collections: string[] = [];
+      for (const collection of (ctx.db as any).collections?.values?.() || []) {
+        if (collection?.name === 'attachments' || collection?.options?.template === 'file') {
+          collections.push(collection.name);
+        }
+      }
+      if (collections.length === 0) return null;
+      const fileManager = (ctx.app as any)?.pm?.get?.('file-manager');
+      const fields = ['id', 'url', 'path', 'filename', 'extname', 'storageId'];
+      for (const collectionName of collections) {
+        const repo = ctx.db.getRepository(collectionName);
+        if (!repo) continue;
+        try {
+          const byUrl = await repo.findOne({ filter: { url: decodedUrl }, fields });
+          if (byUrl) return byUrl;
+        } catch {
+          // 忽略单次查询失败。
+        }
+        try {
+          const candidates = await repo.find({ filter: { filename: fileName }, fields, limit: 20 });
+          for (const record of candidates) {
+            try {
+              if (typeof fileManager?.getFileURL === 'function') {
+                const canonical = String((await fileManager.getFileURL(record, false)) || '').trim();
+                if (canonical && decodeURIComponent(canonical.split('?')[0]) === decodedUrl) return record;
+              }
+            } catch {
+              // 忽略单条记录解析失败。
+            }
+          }
+        } catch {
+          // 忽略单次查询失败。
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * 为指定文件地址签发短期预览令牌（不写 ctx）。
-   * 令牌绑定的是源文件地址（NocoBase 托管路径），代理侧据此校验一致性。
-   * 非 NocoBase 托管地址或未登录时返回 null。
+   * 令牌绑定的是源文件地址（NocoBase 托管路径或匹配的存储直链），代理侧据此校验一致性。
+   * 非 NocoBase 托管地址、无法匹配到文件记录或未登录时返回 null。
    */
   private async issuePreviewTokenForFileUrl(ctx: ActionContext, fileUrl: string): Promise<string | null> {
-    if (!isNocoBaseManagedFileUrl(fileUrl)) return null;
+    let allowed = this.getCachedFileUrlAllowance(fileUrl);
+    if (allowed === undefined) {
+      const resolution = await this.resolveAllowedFileFetchTarget(ctx, fileUrl);
+      allowed = resolution.allowed;
+      this.cacheFileUrlAllowance(fileUrl, resolution.allowed);
+    }
+    if (!allowed) return null;
     const currentUser = ctx?.state?.currentUser || ctx?.state?.user || ctx?.auth?.user || null;
     const userId = (currentUser as any)?.id;
     if (!userId) return null;
@@ -1131,6 +1233,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     const issuePreviewTokenForFileUrl = this.issuePreviewTokenForFileUrl.bind(this);
     const buildSameOriginAbsoluteUrl = this.buildSameOriginAbsoluteUrl.bind(this);
     const resolveStorageDirectUrl = this.resolveStorageDirectUrl.bind(this);
+    const resolveAllowedFileFetchTarget = this.resolveAllowedFileFetchTarget.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewPreview',
       actions: {
@@ -1153,8 +1256,9 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
           }
 
           try {
-            // 仅允许 NocoBase 托管的文件地址，防止把任意地址交给 kkFileView 服务器拉取。
-            if (!isNocoBaseManagedFileUrl(fileUrl)) {
+            // 仅允许 NocoBase 托管地址或与文件记录匹配的存储直链，防止把任意地址交给 kkFileView 服务器拉取。
+            const resolution = await resolveAllowedFileFetchTarget(ctx, fileUrl);
+            if (!resolution.allowed) {
               ctx.status = 403;
               ctx.body = { data: { message: 'url-not-allowed' } };
               return;
@@ -1217,9 +1321,21 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             ctx.body = { data: { message: 'url-required' } };
             return;
           }
-          if (!isNocoBaseManagedFileUrl(fileUrl)) {
+          const resolution = await resolveAllowedFileFetchTarget(ctx, fileUrl);
+          if (!resolution.allowed) {
             ctx.status = 403;
             ctx.body = { data: { message: 'url-not-allowed' } };
+            return;
+          }
+          // 外部存储直链（如 MinIO/S3）：地址即为文件真实地址，直接返回，
+          // 第三方预览服务（如 BaseMetas）可直接从文件所在服务器下载。
+          if (!isNocoBaseManagedFileUrl(fileUrl)) {
+            ctx.body = {
+              data: {
+                directUrl: fileUrl,
+                originalUrl: fileUrl,
+              },
+            };
             return;
           }
           // 优先解析为文件存储的真实地址（如内网 MinIO/S3/远程文件服务器），
@@ -2074,6 +2190,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
     }
     const decodeToken = (this.app as any).authManager.jwt.decode.bind((this.app as any).authManager.jwt);
     const previewTokenRegistry = this.previewTokenRegistry;
+    const resolveAllowedFileFetchTarget = this.resolveAllowedFileFetchTarget.bind(this);
     this.app.resourceManager.define({
       name: 'kkfileviewFileViewerProxy',
       actions: {
@@ -2086,20 +2203,23 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             return;
           }
           try {
-            // 仅允许 NocoBase 托管的文件地址，防止代理被用作任意 URL 的 SSRF 通道。
-            if (!isNocoBaseManagedFileUrl(fileUrl)) {
+            // 仅允许 NocoBase 托管地址或与文件记录匹配的存储直链，防止代理被用作任意 URL 的 SSRF 通道。
+            const resolution = await resolveAllowedFileFetchTarget(ctx, fileUrl);
+            if (!resolution.allowed) {
               ctx.status = 403;
               ctx.body = { data: { message: 'url-not-allowed' } };
               return;
             }
-            // 不解析到外部存储直链：改为请求 NocoBase 自身的 /files/ 或 /storage/ 路径，
-            // 由 NocoBase 文件中间件执行 ACL 校验后再 302 跳转到存储地址，axios 跟随重定向获取文件。
-            let targetUrl = fileUrl;
-            try {
-              const parsed = new URL(targetUrl, 'http://localhost');
-              targetUrl = parsed.pathname + parsed.search;
-            } catch {
-              // 保持原样。
+            let targetUrl = resolution.targetUrl;
+            if (isNocoBaseManagedFileUrl(fileUrl)) {
+              // 不解析到外部存储直链：改为请求 NocoBase 自身的 /files/ 或 /storage/ 路径，
+              // 由 NocoBase 文件中间件执行 ACL 校验后再 302 跳转到存储地址，axios 跟随重定向获取文件。
+              try {
+                const parsed = new URL(targetUrl, 'http://localhost');
+                targetUrl = parsed.pathname + parsed.search;
+              } catch {
+                // 保持原样。
+              }
             }
             // 仅接受短期预览令牌访问，避免在预览地址中长期暴露用户会话令牌。
             const rawToken = String(values.token || '').trim();
