@@ -13,6 +13,10 @@ import { getFileExt, unwrapDataArray } from './previewUtils';
 import { GlobalWatermarkProvider } from './GlobalWatermarkProvider';
 import { registerKkfileviewSettings } from './settingsRegistration';
 
+// 供其他插件（如附件清理工具）复用预览能力
+export { KKFilePreviewer } from './KKFilePreviewer';
+export type { PreviewerProps, PreviewFileRecord } from './KKFilePreviewer';
+
 let configLoaded = false;
 let configLoading = false;
 type ApiClientLike = {
