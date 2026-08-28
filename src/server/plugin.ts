@@ -2254,6 +2254,78 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
               ctx.body = { data: { message: 'file-viewer-preview-token-mismatch' } };
               return;
             }
+            // 优先直接从本地磁盘或文件管理器获取文件流，避免回环 HTTP 请求导致的端口与网络 404 错误
+            try {
+              const fs = require('fs');
+              const path = require('path');
+              let record: any = await this.findFileRecordByStorageUrl(ctx, fileUrl);
+              if (!record && isNocoBaseManagedFileUrl(fileUrl)) {
+                const matched = fileUrl.match(/\/attachments\/(\d+)/i) || fileUrl.match(/\/files\/(\d+)/i);
+                if (matched && matched[1]) {
+                  const repo = ctx.db.getRepository('attachments');
+                  if (repo) {
+                    record = await repo.findOne({ filter: { id: matched[1] } });
+                  }
+                }
+              }
+              if (record) {
+                const filename = (typeof record.get === 'function' ? record.get('filename') : record.filename) || '';
+                const recPath = (typeof record.get === 'function' ? record.get('path') : record.path) || '';
+                const storageId = typeof record.get === 'function' ? record.get('storageId') : record.storageId;
+                const mime = (typeof record.get === 'function' ? record.get('mimetype') : record.mimetype) || 'application/octet-stream';
+
+                let localDocRoot = '';
+                if (storageId) {
+                  try {
+                    const storageRepo = ctx.db.getRepository('storages');
+                    const storage = await storageRepo?.findOne?.({ filter: { id: storageId } });
+                    if (storage?.options?.documentRoot) {
+                      localDocRoot = storage.options.documentRoot;
+                    }
+                  } catch {}
+                }
+
+                if (filename) {
+                  const candidatePaths = [
+                    localDocRoot ? path.resolve(localDocRoot, recPath, filename) : null,
+                    localDocRoot ? path.resolve(localDocRoot, filename) : null,
+                    process.env.LOCAL_STORAGE_DEST ? path.resolve(process.env.LOCAL_STORAGE_DEST, recPath, filename) : null,
+                    process.env.LOCAL_STORAGE_DEST ? path.resolve(process.env.LOCAL_STORAGE_DEST, filename) : null,
+                    path.resolve(process.cwd(), 'storage/uploads', recPath, filename),
+                    path.resolve(process.cwd(), 'storage/uploads', filename),
+                  ].filter(Boolean);
+
+                  for (const p of candidatePaths) {
+                    if (fs.existsSync(p)) {
+                      ctx.status = 200;
+                      ctx.set('Content-Type', mime);
+                      ctx.set('Content-Disposition', 'inline');
+                      ctx.body = fs.createReadStream(p);
+                      return;
+                    }
+                  }
+                }
+
+                const fileManager = (this.app as any)?.pm?.get?.('@nocobase/plugin-file-manager') ||
+                                    (this.app as any)?.pm?.get?.('file-manager') ||
+                                    (ctx.app as any)?.pm?.get?.('@nocobase/plugin-file-manager') ||
+                                    (ctx.app as any)?.pm?.get?.('file-manager');
+                if (fileManager && typeof fileManager.getFileStream === 'function') {
+                  const result = await fileManager.getFileStream(record);
+                  const stream = result?.stream || result;
+                  if (stream && typeof stream.pipe === 'function') {
+                    ctx.status = 200;
+                    ctx.set('Content-Type', mime);
+                    ctx.set('Content-Disposition', 'inline');
+                    ctx.body = stream;
+                    return;
+                  }
+                }
+              }
+            } catch (streamErr) {
+              // 忽略本地与流式获取异常，回退至 HTTP 代理
+            }
+
             const token = rawToken;
             if (token && (targetUrl.includes('/files/') || targetUrl.includes('/storage/') || /^\/?(files|storage|api)\//i.test(targetUrl)) && !targetUrl.includes('token=')) {
               const separator = targetUrl.includes('?') ? '&' : '?';
@@ -2261,7 +2333,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             }
             if (!/^https?:\/\//i.test(targetUrl)) {
               const request = (ctx as any)?.request || {};
-              const host = request.header?.host || request.host || '';
+              const host = request.header?.host || request.host || `127.0.0.1:${process.env.APP_PORT || 13000}`;
               const protocol = request.protocol || 'http';
               const publicPath = (ctx as any)?.app?.getAppPublicPath?.() || process.env.APP_PUBLIC_PATH || '/';
               const base = `${protocol}://${host}${publicPath.replace(/\/+$/, '')}`;
