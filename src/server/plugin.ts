@@ -1034,7 +1034,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       return { allowed: true, targetUrl: fileUrl };
     }
     const found = await this.findFileRecordByStorageUrl(ctx, fileUrl);
-    if (!found) return { allowed: false, targetUrl: '' };
+    if (!found?.record) return { allowed: false, targetUrl: '' };
     return { allowed: true, targetUrl: fileUrl };
   }
 
@@ -1070,7 +1070,10 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
    * 2. 按文件名匹配候选记录后，用 file-manager 的 getFileURL 生成规范地址并与请求地址比较，
    *    确保地址确实属于该文件记录对应的存储，而非任意外部地址。
    */
-  private async findFileRecordByStorageUrl(ctx: ActionContext, fileUrl: string): Promise<unknown | null> {
+  private async findFileRecordByStorageUrl(
+    ctx: ActionContext,
+    fileUrl: string,
+  ): Promise<{ record: unknown; collectionName: string } | null> {
     try {
       const parsed = new URL(fileUrl);
       const decodedPath = decodeURIComponent(parsed.pathname);
@@ -1091,7 +1094,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
         if (!repo) continue;
         try {
           const byUrl = await repo.findOne({ filter: { url: decodedUrl }, fields });
-          if (byUrl) return byUrl;
+          if (byUrl) return { record: byUrl, collectionName };
         } catch {
           // 忽略单次查询失败。
         }
@@ -1101,7 +1104,7 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             try {
               if (typeof fileManager?.getFileURL === 'function') {
                 const canonical = String((await fileManager.getFileURL(record, false)) || '').trim();
-                if (canonical && decodeURIComponent(canonical.split('?')[0]) === decodedUrl) return record;
+                if (canonical && decodeURIComponent(canonical.split('?')[0]) === decodedUrl) return { record, collectionName };
               }
             } catch {
               // 忽略单条记录解析失败。
@@ -1114,6 +1117,34 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * 记录级文件访问判定：复用 file-manager 的 ACL view 权限解析（resolveActionParams），
+   * 管理员配置的附件表权限（含 own 合并参数/字段权限）在此同步生效；
+   * 平台默认（attachments 对登录用户开放 view）时行为不变，判定失败一律拒绝（fail-closed）。
+   */
+  private async canViewAttachment(ctx: ActionContext, record: any, collectionName: string): Promise<boolean> {
+    try {
+      const id = record?.get ? record.get('id') : record?.id;
+      if (id === undefined || id === null) return false;
+      const db = ctx.db || this.app.db;
+      const collection = db.getCollection(collectionName || 'attachments');
+      if (!collection) return false;
+      const acl = (ctx as any).dataSource?.acl || (this.app as any).acl;
+      if (!acl) return false;
+      if ((this.app as any).options?.acl === false) return true; // 平台关闭 ACL 时与文件端点行为一致
+      const permission = await acl.resolveActionParams(ctx, {
+        resourceName: collection.name,
+        actionName: 'view',
+        params: { filter: { id } },
+      });
+      const mergedFilter = permission?.mergedParams?.filter ?? { id };
+      const found = await db.getRepository(collection.name)?.findOne({ filter: mergedFilter, fields: ['id'] });
+      return !!found;
+    } catch {
+      return false;
     }
   }
 
@@ -2258,15 +2289,28 @@ export class PluginFilePreviewerKkfileviewServer extends Plugin {
             try {
               const fs = require('fs');
               const path = require('path');
-              let record: any = await this.findFileRecordByStorageUrl(ctx, fileUrl);
-              if (!record && isNocoBaseManagedFileUrl(fileUrl)) {
+              let record: any = null;
+              let recordCollection = '';
+              const matchedByStorage = await this.findFileRecordByStorageUrl(ctx, fileUrl);
+              if (matchedByStorage?.record) {
+                record = matchedByStorage.record;
+                recordCollection = matchedByStorage.collectionName;
+              } else if (isNocoBaseManagedFileUrl(fileUrl)) {
                 const matched = fileUrl.match(/\/attachments\/(\d+)/i) || fileUrl.match(/\/files\/(\d+)/i);
                 if (matched && matched[1]) {
                   const repo = ctx.db.getRepository('attachments');
                   if (repo) {
                     record = await repo.findOne({ filter: { id: matched[1] } });
+                    if (record) recordCollection = 'attachments';
                   }
                 }
+              }
+              // 记录级访问判定：复用 file-manager 的 ACL view 权限解析，
+              // 防止代理绕过文件级权限（含管理员配置的 own 过滤/字段权限）被用作 IDOR 通道
+              if (record && !(await this.canViewAttachment(ctx, record, recordCollection))) {
+                ctx.status = 403;
+                ctx.body = { data: { message: 'file-viewer-preview-token-no-access' } };
+                return;
               }
               if (record) {
                 const filename = (typeof record.get === 'function' ? record.get('filename') : record.filename) || '';
